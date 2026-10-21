@@ -1,0 +1,180 @@
+name: sandbox
+
+# One-off Linux VM for PR repro: build target at base+head refs, drive UI with a
+# Playwright scenario, publish before/after screenshots + recordings.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Target repo (owner/name)
+        default: pingdotgg/t3code
+      base_ref:
+        description: Before ref (branch/sha)
+        default: main
+      head_ref:
+        description: After ref (branch/sha, or pull/<N>/head for a PR)
+        required: true
+      scenario:
+        description: Scenario path in this repo
+        default: scenarios/example.mjs
+      sides:
+        description: Which sides to run
+        type: choice
+        options: [both, before, after]
+        default: both
+      debug_shell:
+        description: Open tmate SSH session (actor only) after capture
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          SIDES: ${{ inputs.sides }}
+          BASE: ${{ inputs.base_ref }}
+          HEAD: ${{ inputs.head_ref }}
+        run: |
+          jq -cn --arg s "$SIDES" --arg b "$BASE" --arg h "$HEAD" '
+            [{side:"before",ref:$b},{side:"after",ref:$h}]
+            | map(select($s=="both" or .side==$s))
+            | {include: .}' | sed 's/^/matrix=/' >> "$GITHUB_OUTPUT"
+
+  capture:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      SIDE: ${{ matrix.side }}
+      OUT_DIR: ${{ github.workspace }}/out/${{ matrix.side }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout target
+        env:
+          REPO: ${{ inputs.repo }}
+          REF: ${{ matrix.ref }}
+        run: |
+          git init target
+          git -C target fetch --depth=1 "https://github.com/$REPO" "$REF"
+          git -C target checkout --detach FETCH_HEAD
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install vp
+        run: |
+          curl -fsSL https://vite.plus | bash
+          echo "$HOME/.vite-plus/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pnpm
+          key: deps-${{ inputs.repo }}-${{ hashFiles('target/pnpm-lock.yaml', 'target/bun.lock') }}
+          restore-keys: deps-${{ inputs.repo }}-
+
+      - name: Install target deps
+        working-directory: target
+        run: vp i
+
+      - name: Install harness (Playwright, ffmpeg, imagemagick)
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends ffmpeg imagemagick
+
+      - name: Start target dev server
+        working-directory: target
+        run: |
+          mkdir -p "$OUT_DIR"
+          nohup xvfb-run -a vp run dev --home-dir "$RUNNER_TEMP/t3home" > "$RUNNER_TEMP/dev.log" 2>&1 &
+          for i in $(seq 1 90); do
+            url=$(grep -m1 -oE 'pairingUrl: *[^ ]+' "$RUNNER_TEMP/dev.log" | sed 's/pairingUrl: *//' || true)
+            [ -n "$url" ] && break
+            sleep 2
+          done
+          if [ -z "$url" ]; then cat "$RUNNER_TEMP/dev.log"; echo "no pairingUrl"; exit 1; fi
+          echo "::add-mask::$url"
+          echo "PAIRING_URL=$url" >> "$GITHUB_ENV"
+
+      - name: Run scenario
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+        run: node "$SCENARIO"
+
+      - name: Dev server log
+        if: always()
+        run: cp "$RUNNER_TEMP/dev.log" "$OUT_DIR/dev.log" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: out-${{ matrix.side }}
+          path: out/${{ matrix.side }}
+
+      - name: Debug shell
+        if: inputs.debug_shell
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+
+  publish:
+    needs: capture
+    if: always() && needs.capture.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          pattern: out-*
+
+      - name: Build before/after + GIFs
+        run: |
+          sudo apt-get install -y --no-install-recommends ffmpeg imagemagick
+          mkdir -p pub
+          for f in out/out-after/*.png; do
+            n=$(basename "$f")
+            cp "$f" "pub/after-$n"
+            if [ -f "out/out-before/$n" ]; then
+              cp "out/out-before/$n" "pub/before-$n"
+              convert "out/out-before/$n" "$f" +append "pub/side-by-side-$n"
+            fi
+          done
+          for f in out/out-*/*.webm; do
+            side=$(basename "$(dirname "$f")" | sed 's/^out-//')
+            b=$(basename "$f" .webm)
+            ffmpeg -loglevel error -y -i "$f" -vf "fps=10,scale=960:-1:flags=lanczos" "pub/$side-$b.gif"
+            ffmpeg -loglevel error -y -i "$f" -c:v libx264 -pix_fmt yuv420p "pub/$side-$b.mp4"
+          done
+          ls -la pub
+
+      - name: Release assets + markdown
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="evidence-${GITHUB_RUN_ID}"
+          gh release create "$tag" pub/* --repo "$GITHUB_REPOSITORY" \
+            --title "$tag" --notes "Target ${{ inputs.repo }} ${{ inputs.base_ref }}..${{ inputs.head_ref }}"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag"
+          {
+            echo '### Evidence markdown'
+            echo '```markdown'
+            for f in pub/side-by-side-*.png; do [ -f "$f" ] && echo "![$(basename "$f")]($base/$(basename "$f"))"; done
+            for f in pub/after-*.gif; do [ -f "$f" ] && echo "![$(basename "$f")]($base/$(basename "$f"))"; done
+            for f in pub/*.mp4; do [ -f "$f" ] && echo "[$(basename "$f")]($base/$(basename "$f"))"; done
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

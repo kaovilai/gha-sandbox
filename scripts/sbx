@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# sbx run <pr-number|ref> [scenario] [--repo owner/name] [--sides both|before|after] [--shell]
+# Dispatch sandbox workflow, wait, download artifacts to ./out/<run-id>/.
+set -euo pipefail
+
+cmd=${1:-}; shift || true
+[ "$cmd" = run ] || { sed -n '2,3p' "$0"; exit 2; }
+
+target=${1:?pr number or ref}; shift
+scenario=scenarios/example.mjs
+repo=pingdotgg/t3code sides=both shell=false
+[ $# -gt 0 ] && [[ $1 != --* ]] && { scenario=$1; shift; }
+while [ $# -gt 0 ]; do
+  case $1 in
+    --repo) repo=$2; shift 2 ;;
+    --sides) sides=$2; shift 2 ;;
+    --shell) shell=true; shift ;;
+    *) echo "unknown $1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ $target =~ ^[0-9]+$ ]]; then head="pull/$target/head"; else head=$target; fi
+here=$(git rev-parse --show-toplevel)
+self=$(git -C "$here" remote get-url origin | sed -E 's#.*github.com[:/]##; s#\.git$##')
+
+start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+gh workflow run sandbox.yml --repo "$self" \
+  -f repo="$repo" -f head_ref="$head" -f scenario="$scenario" \
+  -f sides="$sides" -f debug_shell="$shell"
+
+sleep 5
+id=$(gh run list --repo "$self" --workflow sandbox.yml --created ">=$start" \
+  --json databaseId --jq '.[0].databaseId')
+echo "run $id: https://github.com/$self/actions/runs/$id"
+gh run watch "$id" --repo "$self" --exit-status || true
+gh run download "$id" --repo "$self" --dir "$here/out/$id" || true
+echo "artifacts: $here/out/$id"
+gh run view "$id" --repo "$self" --log 2>/dev/null | grep -A8 'Evidence markdown' | head -12 || true
