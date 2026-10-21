@@ -70,24 +70,13 @@ jobs:
           git -C target fetch --depth=1 "https://github.com/$REPO" "$REF"
           git -C target checkout --detach FETCH_HEAD
 
-      - uses: actions/setup-node@v4
+      - name: Setup vp + install target deps
+        uses: voidzero-dev/setup-vp@v1.21.2
         with:
-          node-version: 24
-
-      - name: Install vp
-        run: |
-          curl -fsSL https://vite.plus | bash
-          echo "$HOME/.vite-plus/bin" >> "$GITHUB_PATH"
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/pnpm
-          key: deps-${{ inputs.repo }}-${{ hashFiles('target/pnpm-lock.yaml', 'target/bun.lock') }}
-          restore-keys: deps-${{ inputs.repo }}-
-
-      - name: Install target deps
-        working-directory: target
-        run: vp i
+          node-version: "24"
+          working-directory: target
+          cache: true
+          run-install: true
 
       - name: Install harness (Playwright, ffmpeg, imagemagick)
         run: |
@@ -138,12 +127,19 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           path: out
           pattern: out-*
 
       - name: Build before/after + GIFs
         run: |
+          shopt -s nullglob
+          if ! compgen -G 'out/out-*/*' > /dev/null; then
+            echo "no capture output; nothing to publish"
+            echo "### No evidence captured (all capture jobs failed)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           sudo apt-get install -y --no-install-recommends ffmpeg imagemagick
           mkdir -p pub
           for f in out/out-after/*.png; do
@@ -163,6 +159,7 @@ jobs:
           ls -la pub
 
       - name: Release assets + markdown
+        if: hashFiles('pub/**') != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
