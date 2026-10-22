@@ -121,6 +121,7 @@ jobs:
           name: out-android-app
           path: dl
       - name: Push evidence branch + markdown
+        timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/publish-evidence.sh dl android-app

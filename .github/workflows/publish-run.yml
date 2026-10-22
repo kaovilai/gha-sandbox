@@ -1,0 +1,38 @@
+name: publish-run
+
+# Re-publish a finished run's artifacts to the `evidence` branch (no rebuild).
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Source workflow run id
+        required: true
+      artifact:
+        description: Artifact name (e.g. out-android-app)
+        required: true
+      label:
+        description: Label for the evidence dir
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: dl
+      - name: Push evidence branch + markdown
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-evidence.sh dl ${{ inputs.label }}

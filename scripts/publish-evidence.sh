@@ -10,7 +10,7 @@ label=${2:?label}
 
 run="${GITHUB_RUN_ID}-${label}"
 pub=$(mktemp -d)
-command -v ffmpeg >/dev/null || sudo apt-get install -y --no-install-recommends ffmpeg >/dev/null
+command -v ffmpeg >/dev/null || sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq -o Dpkg::Options::=--force-confold --no-install-recommends ffmpeg >/dev/null
 
 while IFS= read -r -d '' f; do
   rel=${f#"$src"/}
@@ -20,9 +20,9 @@ while IFS= read -r -d '' f; do
     *.png) cp "$f" "$pub/$flat" ;;
     *.mp4|*.webm)
       base=${flat%.*}
-      ffmpeg -loglevel error -y -i "$f" -c:v libx264 -pix_fmt yuv420p "$pub/$base.mp4"
+      ffmpeg -nostdin -loglevel error -y -i "$f" -c:v libx264 -pix_fmt yuv420p "$pub/$base.mp4"
       # GIF for inline embedding: first 15 s, <=480 px wide, 8 fps.
-      ffmpeg -loglevel error -y -t 15 -i "$f" -vf "fps=8,scale='min(480,iw)':-1:flags=lanczos" "$pub/$base.gif"
+      ffmpeg -nostdin -loglevel error -y -t 15 -i "$f" -vf "fps=8,scale='min(480,iw)':-1:flags=lanczos" "$pub/$base.gif"
       ;;
   esac
 done < <(find "$src" -type f \( -name '*.png' -o -name '*.mp4' -o -name '*.webm' \) -print0)
