@@ -55,6 +55,10 @@ for i in 1 2 3 4 5; do
   xdotool key Return || true
   sleep 2
 done
+# Last step ("Import your projects") ignores Enter; Escape dismisses the dialog.
+xdotool key Escape || true
+sleep 2
+xdotool key Escape || true
 sleep 3
 import -window root "$out/desktop.png"
 

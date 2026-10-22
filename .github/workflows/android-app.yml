@@ -32,10 +32,11 @@ jobs:
 
       - name: "Swap + Gradle memory limits (16 GB runner)"
         run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          # Runner image already uses /swapfile; add a second one on the big /mnt disk.
+          sudo fallocate -l 10G /mnt/swap2
+          sudo chmod 600 /mnt/swap2
+          sudo mkswap /mnt/swap2
+          sudo swapon /mnt/swap2
           mkdir -p ~/.gradle
           {
             echo 'org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m'
