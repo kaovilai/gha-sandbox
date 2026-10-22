@@ -61,6 +61,13 @@ jobs:
           brew install cameroncooke/axe/axe
           axe --version
 
+      - name: Cache Xcode DerivedData (native build is the slow part)
+        uses: actions/cache@v4
+        with:
+          path: target/apps/mobile/.showcase/ios-derived-data
+          key: ios-dd-${{ runner.os }}-${{ hashFiles('target/pnpm-lock.yaml') }}
+          restore-keys: ios-dd-${{ runner.os }}-
+
       - name: Build + capture on simulator
         run: bash scripts/ios-app.sh
 

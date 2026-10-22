@@ -11,6 +11,10 @@ cd target
 # Free runners are slower than upstream's: first Metro bundle can exceed the hard-coded
 # 90-120 s scene waits. Patch our throwaway checkout only.
 perl -pi -e 's/waitForScene\(120_000\)/waitForScene(360_000)/; s/timeoutMs = 90_000,/timeoutMs = 360_000,/' scripts/mobile-showcase.ts
+# iOS simulators share the host loopback; the runner's LAN IPv4 (upstream's default Metro host
+# for iOS) is unreachable from the simulator, leaving the dev launcher on "Searching...".
+perl -pi -e 's/const metroHost = hasIos \? lanIpv4Address\(\) : "127\.0\.0\.1";/const metroHost = "127.0.0.1";/' scripts/mobile-showcase.ts
+grep -q 'const metroHost = "127.0.0.1";' scripts/mobile-showcase.ts || echo "WARN: metroHost patch did not apply"
 # Diagnostics: periodic simulator screenshots + app log, to see why a scene never renders.
 mkdir -p "$out/diag"
 ( i=0; while :; do sleep 45; i=$((i+1)); xcrun simctl io booted screenshot "$out/diag/t$(printf %03d "$i").png" >/dev/null 2>&1 || true; done ) &
