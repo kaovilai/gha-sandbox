@@ -48,7 +48,7 @@ jobs:
       - name: System deps (Xvfb, X tools, ffmpeg, Electron libs)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb xdotool x11-utils imagemagick ffmpeg \
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libsecret-1-dev xvfb xdotool x11-utils imagemagick ffmpeg \
             libgbm1 libnss3 libgtk-3-0t64 libasound2t64 libxss1 libxtst6 libatk-bridge2.0-0t64
           # Ubuntu 24 blocks the unprivileged user namespaces Chromium's sandbox needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

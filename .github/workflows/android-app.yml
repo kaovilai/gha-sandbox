@@ -52,13 +52,13 @@ jobs:
               - --filter=@t3tools/scripts...
               - --filter=t3...
 
-      - name: Expose pnpm
+      - name: Install pnpm (pinned by target)
         working-directory: target
         run: |
-          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
-          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
-          "$vp_pnpm_bin/pnpm" --version
+          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop().split('+')[0]")"
+          npm install -g "pnpm@$pnpm_version"
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          pnpm --version
 
       - uses: actions/setup-java@v4
         with:
