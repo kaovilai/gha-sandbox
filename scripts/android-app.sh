@@ -8,6 +8,9 @@ root=$(pwd)
 args=(--platform android --device pixel --scene threads --scene thread --appearance dark)
 
 cd target
+# Free runners are slower than upstream's: first Metro bundle can exceed the hard-coded
+# 90-120 s scene waits. Patch our throwaway checkout only.
+perl -pi -e 's/waitForScene\(120_000\)/waitForScene(900_000)/; s/timeoutMs = 90_000,/timeoutMs = 900_000,/' scripts/mobile-showcase.ts
 pnpm screenshots:mobile "${args[@]}" 2>&1 | tee "$out/pass1.log"
 rc1=${PIPESTATUS[0]}
 mkdir -p "$out/screenshots"

@@ -22,13 +22,27 @@ jobs:
     timeout-minutes: 150
     env:
       T3_SHOWCASE_ANDROID_ABI: x86_64
-      NODE_OPTIONS: --max-old-space-size=8192
+      NODE_OPTIONS: --max-old-space-size=4096
       OUT_DIR: ${{ github.workspace }}/out/android-app
     steps:
       - name: Free disk (Android SDK + Gradle + emulator image are large)
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/node_modules
           df -h /
+
+      - name: "Swap + Gradle memory limits (16 GB runner)"
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          mkdir -p ~/.gradle
+          {
+            echo 'org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m'
+            echo 'kotlin.daemon.jvm.options=-Xmx2g'
+            echo 'org.gradle.workers.max=2'
+          } >> ~/.gradle/gradle.properties
+          free -h
 
       - uses: actions/checkout@v4
 
@@ -82,7 +96,7 @@ jobs:
           profile: pixel_7_pro
           avd-name: Pixel_10_Pro
           cores: 4
-          ram-size: 4096M
+          ram-size: 3072M
           disable-animations: false
           script: bash scripts/android-app.sh
 
