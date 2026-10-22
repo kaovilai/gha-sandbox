@@ -9,12 +9,18 @@ on:
       api_level:
         description: Android API level
         default: "34"
+      platforms:
+        description: Which probes to run
+        type: choice
+        options: [both, android, ios]
+        default: both
 
 permissions:
   contents: read
 
 jobs:
   android:
+    if: inputs.platforms != 'ios'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -44,6 +50,7 @@ jobs:
           path: out/android
 
   ios:
+    if: inputs.platforms != 'android'
     runs-on: macos-latest
     timeout-minutes: 30
     steps:

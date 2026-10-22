@@ -10,15 +10,16 @@ mkdir -p out/android
 } > out/android/info.txt
 
 adb shell input keyevent KEYCODE_HOME
-adb shell screenrecord --time-limit 8 /sdcard/rec.mp4 &
+# /sdcard is not writable by screenrecord on this image; /data/local/tmp is.
+adb shell screenrecord --time-limit 12 /data/local/tmp/rec.mp4 &
 rec=$!
 sleep 1
-adb shell am start -a android.settings.SETTINGS
-sleep 3
+adb shell am start -W -a android.settings.SETTINGS
+sleep 6   # let the splash finish
 adb exec-out screencap -p > out/android/settings.png
 adb shell input swipe 540 1600 540 600 300   # scroll for motion in the recording
 sleep 2
 wait "$rec" || true
 sleep 1
-adb pull /sdcard/rec.mp4 out/android/recording.mp4
+adb pull /data/local/tmp/rec.mp4 out/android/recording.mp4
 ls -la out/android
