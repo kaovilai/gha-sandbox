@@ -22,7 +22,7 @@ cd ..
 # Wait for the app window (up to 5 min: dev build + electron start).
 win=
 for i in $(seq 1 150); do
-  win=$(xdotool search --onlyvisible --name '.' 2>/dev/null | head -1 || true)
+  win=$(xdotool search --onlyvisible --name '^T3 Code' 2>/dev/null | head -1 || true)
   [ -n "$win" ] && break
   kill -0 "$dev" 2>/dev/null || { echo "dev process exited"; break; }
   sleep 2
@@ -30,10 +30,20 @@ done
 xwininfo -root -tree > "$out/windows.txt" || true
 if [ -z "$win" ]; then tail -80 "$out/desktop.log"; echo "no window appeared"; exit 1; fi
 
+# Dev builds auto-open DevTools in a second window; hide it so it never lands in captures.
+for d in $(xdotool search --onlyvisible --name '^Developer Tools' 2>/dev/null || true); do
+  xdotool windowunmap "$d" || true
+done
 xdotool windowsize "$win" $W $H || true
 xdotool windowmove "$win" 0 0 || true
 sleep 20   # let the embedded server + UI settle
 
+import -window root "$out/desktop-first-run.png"
+# First-run analytics/onboarding dialog: Enter hits the default "Continue".
+xdotool key --window "$win" Return || true
+sleep 3
+xdotool key --window "$win" Return || true
+sleep 3
 import -window root "$out/desktop.png"
 
 # 12 s real-desktop recording with some pointer motion.
