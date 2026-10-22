@@ -10,7 +10,7 @@ label=${2:?label}
 
 run="${GITHUB_RUN_ID}-${label}"
 pub=$(mktemp -d)
-command -v ffmpeg >/dev/null || sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq -o Dpkg::Options::=--force-confold --no-install-recommends ffmpeg >/dev/null
+command -v ffmpeg >/dev/null || { echo "ffmpeg required (use setup-ffmpeg)"; exit 1; }
 
 while IFS= read -r -d '' f; do
   rel=${f#"$src"/}

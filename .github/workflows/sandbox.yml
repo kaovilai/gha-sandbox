@@ -126,6 +126,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Setup ffmpeg (static build; apt mirror stalls on runners)
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@v4
         continue-on-error: true
         with:
@@ -140,7 +144,6 @@ jobs:
             echo "### No evidence captured (all capture jobs failed)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq -o Dpkg::Options::=--force-confold --no-install-recommends ffmpeg imagemagick
           mkdir -p pub
           for f in out/out-after/*.png; do
             n=$(basename "$f")

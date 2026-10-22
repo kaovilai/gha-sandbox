@@ -120,6 +120,10 @@ jobs:
         with:
           name: out-android-app
           path: dl
+      - name: Setup ffmpeg (static build; apt mirror stalls on runners)
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          github-token: ${{ github.token }}
       - name: Push evidence branch + markdown
         timeout-minutes: 10
         env:
