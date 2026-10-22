@@ -1,0 +1,93 @@
+name: android-app
+
+# t3code mobile app (Expo dev client) on an Android emulator: build, seed, capture
+# screenshots via upstream scripts/mobile-showcase.ts, plus a screen recording pass.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Target repo (owner/name)
+        default: pingdotgg/t3code
+      ref:
+        description: Ref (branch/sha, or pull/<N>/head)
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      T3_SHOWCASE_ANDROID_ABI: x86_64
+      NODE_OPTIONS: --max-old-space-size=8192
+      OUT_DIR: ${{ github.workspace }}/out/android-app
+    steps:
+      - name: Free disk (Android SDK + Gradle + emulator image are large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/node_modules
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - name: Checkout target
+        env:
+          REPO: ${{ inputs.repo }}
+          REF: ${{ inputs.ref }}
+        run: |
+          git init target
+          git -C target fetch --depth=1 "https://github.com/$REPO" "$REF"
+          git -C target checkout --detach FETCH_HEAD
+
+      - uses: voidzero-dev/setup-vp@v1.21.2
+        with:
+          node-version: "24"
+          working-directory: target
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/mobile...
+              - --filter=@t3tools/scripts...
+              - --filter=t3...
+
+      - name: Expose pnpm
+        working-directory: target
+        run: |
+          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
+          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
+          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
+          "$vp_pnpm_bin/pnpm" --version
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Build + capture on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          avd-name: Pixel_10_Pro
+          cores: 4
+          ram-size: 4096M
+          disable-animations: false
+          script: bash scripts/android-app.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: out-android-app
+          path: out/android-app
