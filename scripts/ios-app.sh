@@ -10,9 +10,19 @@ args=(--platform ios --device iphone-6.9 --scene threads --scene thread --appear
 cd target
 # Free runners are slower than upstream's: first Metro bundle can exceed the hard-coded
 # 90-120 s scene waits. Patch our throwaway checkout only.
-perl -pi -e 's/waitForScene\(120_000\)/waitForScene(900_000)/; s/timeoutMs = 90_000,/timeoutMs = 900_000,/' scripts/mobile-showcase.ts
+perl -pi -e 's/waitForScene\(120_000\)/waitForScene(360_000)/; s/timeoutMs = 90_000,/timeoutMs = 360_000,/' scripts/mobile-showcase.ts
+# Diagnostics: periodic simulator screenshots + app log, to see why a scene never renders.
+mkdir -p "$out/diag"
+( i=0; while :; do sleep 45; i=$((i+1)); xcrun simctl io booted screenshot "$out/diag/t$(printf %03d "$i").png" >/dev/null 2>&1 || true; done ) &
+diag1=$!
+( until xcrun simctl list devices | grep -q '(Booted)'; do sleep 2; done
+  xcrun simctl spawn booted log stream --level debug --style compact \
+    --predicate 'process == "T3Code" OR process == "SpringBoard" OR subsystem == "com.apple.CFNetwork"' > "$out/diag/app.log" 2>&1 ) &
+diag2=$!
 pnpm screenshots:mobile "${args[@]}" 2>&1 | tee "$out/pass1.log"
 rc1=${PIPESTATUS[0]}
+kill "$diag1" "$diag2" 2>/dev/null || true
+pkill -f 'simctl spawn booted log stream' 2>/dev/null || true
 mkdir -p "$out/screenshots"
 cp -r artifacts/app-store/screenshots/apple/. "$out/screenshots/" 2>/dev/null || true
 
