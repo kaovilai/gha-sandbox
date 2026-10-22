@@ -82,7 +82,7 @@ jobs:
         run: |
           npm ci
           npx playwright install --with-deps chromium
-          sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq -o Dpkg::Options::=--force-confold --no-install-recommends ffmpeg imagemagick
+          bash scripts/apt-install.sh ffmpeg imagemagick
 
       - name: Start target dev server
         working-directory: target

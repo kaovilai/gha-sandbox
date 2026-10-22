@@ -46,11 +46,10 @@ jobs:
           key: electron-${{ runner.os }}-${{ hashFiles('target/pnpm-lock.yaml') }}
 
       - name: System deps (Xvfb, X tools, ffmpeg, Electron libs)
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq -o Dpkg::Options::=--force-confold --no-install-recommends build-essential pkg-config libsecret-1-dev xvfb xdotool x11-utils imagemagick ffmpeg \
-            libgbm1 libnss3 libgtk-3-0t64 libasound2t64 libxss1 libxtst6 libatk-bridge2.0-0t64
+          bash scripts/apt-install.sh build-essential pkg-config libsecret-1-dev xvfb xdotool x11-utils \
+            imagemagick ffmpeg libgbm1 libnss3 libgtk-3-0t64 libasound2t64 libxss1 libxtst6 libatk-bridge2.0-0t64
           # Ubuntu 24 blocks the unprivileged user namespaces Chromium's sandbox needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
