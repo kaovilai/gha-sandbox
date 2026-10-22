@@ -15,6 +15,7 @@ perl -pi -e 's/waitForScene\(120_000\)/waitForScene(360_000)/; s/timeoutMs = 90_
 # for iOS) is unreachable from the simulator, leaving the dev launcher on "Searching...".
 perl -pi -e 's/const metroHost = hasIos \? lanIpv4Address\(\) : "127\.0\.0\.1";/const metroHost = "127.0.0.1";/' scripts/mobile-showcase.ts
 grep -q 'const metroHost = "127.0.0.1";' scripts/mobile-showcase.ts || echo "WARN: metroHost patch did not apply"
+python3 "$root/scripts/patch-showcase-ios.py" scripts/mobile-showcase.ts
 # Diagnostics: periodic simulator screenshots + app log, to see why a scene never renders.
 mkdir -p "$out/diag"
 ( i=0; while :; do sleep 45; i=$((i+1)); xcrun simctl io booted screenshot "$out/diag/t$(printf %03d "$i").png" >/dev/null 2>&1 || true; done ) &
