@@ -39,10 +39,11 @@ xdotool windowmove "$win" 0 0 || true
 sleep 20   # let the embedded server + UI settle
 
 import -window root "$out/desktop-first-run.png"
-# First-run analytics/onboarding dialog: Enter hits the default "Continue".
-xdotool key --window "$win" Return || true
-sleep 3
-xdotool key --window "$win" Return || true
+# First-run onboarding (Connect > Agents > Projects): Enter takes the default action each step.
+for i in 1 2 3 4 5; do
+  xdotool key --window "$win" Return || true
+  sleep 2
+done
 sleep 3
 import -window root "$out/desktop.png"
 
