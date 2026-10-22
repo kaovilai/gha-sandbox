@@ -61,3 +61,21 @@ jobs:
         with:
           name: out-desktop
           path: out/desktop
+
+  publish:
+    needs: capture
+    if: always() && needs.capture.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: out-desktop
+          path: dl
+      - name: Push evidence branch + markdown
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-evidence.sh dl desktop
