@@ -158,20 +158,39 @@ jobs:
           done
           ls -la pub
 
-      - name: Release assets + markdown
+      # Orphan `evidence` branch: raw.githubusercontent.com serves image/* content
+      # types, so PNG/GIF embed inline in PR markdown (release assets do not).
+      - name: Push evidence branch + markdown
         if: hashFiles('pub/**') != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="evidence-${GITHUB_RUN_ID}"
-          gh release create "$tag" pub/* --repo "$GITHUB_REPOSITORY" \
-            --title "$tag" --notes "Target ${{ inputs.repo }} ${{ inputs.base_ref }}..${{ inputs.head_ref }}"
-          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag"
+          run="$GITHUB_RUN_ID"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git clone -q --depth 1 --branch evidence "$remote" ev 2>/dev/null; then
+            git init -q ev
+            git -C ev checkout -q --orphan evidence
+            git -C ev remote add origin "$remote"
+          fi
+          mkdir -p "ev/$run"
+          cp pub/* "ev/$run/"
+          printf 'target=%s base=%s head=%s scenario=%s\n' \
+            "${{ inputs.repo }}" "${{ inputs.base_ref }}" "${{ inputs.head_ref }}" "${{ inputs.scenario }}" > "ev/$run/INFO.txt"
+          git -C ev add -A
+          git -C ev commit -q -m "evidence $run"
+          for i in 1 2 3; do
+            git -C ev push -q origin evidence && break
+            git -C ev pull -q --rebase origin evidence
+          done
+          raw="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/evidence/${run}"
+          blob="https://github.com/${GITHUB_REPOSITORY}/blob/evidence/${run}"
           {
             echo '### Evidence markdown'
             echo '```markdown'
-            for f in pub/side-by-side-*.png; do [ -f "$f" ] && echo "![$(basename "$f")]($base/$(basename "$f"))"; done
-            for f in pub/after-*.gif; do [ -f "$f" ] && echo "![$(basename "$f")]($base/$(basename "$f"))"; done
-            for f in pub/*.mp4; do [ -f "$f" ] && echo "[$(basename "$f")]($base/$(basename "$f"))"; done
+            for f in pub/side-by-side-*.png; do [ -f "$f" ] && echo "![$(basename "$f")]($raw/$(basename "$f"))"; done
+            for f in pub/*.gif; do [ -f "$f" ] && echo "![$(basename "$f")]($raw/$(basename "$f"))"; done
+            for f in pub/*.mp4; do [ -f "$f" ] && echo "[$(basename "$f")]($blob/$(basename "$f")?raw=true)"; done
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

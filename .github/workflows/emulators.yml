@@ -1,0 +1,59 @@
+name: emulators
+
+# Capability probe: can public-repo runners boot Android emulator / iOS simulator and
+# capture screenshot + screen recording? Opens OS Settings; no app build.
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_level:
+        description: Android API level
+        default: "34"
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -la /dev/kvm
+
+      - name: Boot emulator + capture
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ inputs.api_level }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: bash scripts/android-probe.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android
+          path: out/android
+
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Boot simulator + capture
+        run: bash scripts/ios-probe.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios
+          path: out/ios
