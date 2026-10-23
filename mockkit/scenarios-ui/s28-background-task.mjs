@@ -1,8 +1,8 @@
 // S28 background task: the mock agent (xAI background-task protocol, scenario `background-task`) starts a persistent Monitor
 // ("Watch the dev server") and ends its turn while the task is still pending. T3 then shows the composer's background-work
-// banner ("Running: Start monitor: Watch the dev server" + Stop button) although the thread itself is Done; the banner clears
-// when the task reports completion (`_x.ai/task_completed`).
-// The completion is held by a gate (`until`) so the pending state can be pinned, asserted and recorded first.
+// banner ("Running: Start monitor: Watch the dev server" + Stop button) although the thread itself is Done. Releasing the gate
+// (`until`) makes the task report completion (`_x.ai/task_completed` + Grok's own "task-completed" wake turn): T3 shows
+// 'Monitor "..." finished' and the wake reply; the banner is then cleared (by itself or with its Stop button, asserted).
 // Grok (ACP) flavor only: the background-task frames are an xAI extension.
 import { ask, bodyText, dumpPage, expectBody, expectText, expectVisible, startSession } from "../lib/ui.mjs";
 import { release, waitReached } from "../ctl/mockctl.mjs";
@@ -25,20 +25,29 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(800);
   await shot("banner-running");
   await dumpPage(page, "s28 banner running");
-  // completion report -> banner clears
+  // completion report: T3 shows the "Monitor ... finished" row and runs the wake turn that reports the result
   release("bg28", env);
-  const t0 = Date.now();
-  while (BANNER.test(await bodyText(page))) {
-    if (Date.now() - t0 > 40_000) {
-      await dumpPage(page, "s28 banner never cleared");
-      throw new Error("assertion failed: background-work banner is still shown 40s after the task reported completion");
-    }
-    await page.waitForTimeout(400);
-  }
-  // T3 ran the wake turn: the reply that reports the finished task is in the thread
+  await expectText(page, /Monitor "Watch the dev server" finished/, "'Monitor \"Watch the dev server\" finished' row after the completion report", 40_000);
   await expectText(page, /Watch the dev server finished \(exit 0\)\. Last line: dev server listening/, "wake-turn reply reporting the finished task", 40_000);
+  await page.waitForTimeout(6000); // the wake run finishes; the banner is hidden while a run is active and may come back after it
+  await shot("task-finished");
+  // The persistent monitor's own item is only closed by Stop (the mock sends no kill result), so the banner may still be up
+  // after the wake turn. Stop is the real user action for it: clicking it must clear the banner.
+  const lingering = BANNER.test(await bodyText(page));
+  console.log(`FINDING banner still shown after the wake turn: ${lingering}`);
+  if (lingering) {
+    await page.getByRole("button", { name: /^Stop$/ }).first().click();
+    const t0 = Date.now();
+    while (BANNER.test(await bodyText(page))) {
+      if (Date.now() - t0 > 30_000) {
+        await dumpPage(page, "s28 banner survived Stop");
+        throw new Error("assertion failed: background-work banner is still shown 30s after clicking its Stop button");
+      }
+      await page.waitForTimeout(400);
+    }
+    console.log(`FINDING banner cleared ${Date.now() - t0}ms after clicking Stop`);
+  }
   await page.waitForTimeout(1500);
-  console.log(`FINDING banner cleared ${Date.now() - t0}ms after the completion report; page mentions finished task: ${/finished|completed|exit 0/i.test(await bodyText(page))}`);
   await shot("banner-cleared");
   await dumpPage(page, "s28 after completion");
 }
