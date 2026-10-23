@@ -5,6 +5,8 @@ Not long-lived: every run is a fresh runner. Offloads builds/browsers/emulators 
 Evidence never goes into the target repo (t3code CONTRIBUTING.md:92-94); it lands on this repo's
 orphan `evidence` branch (raw URLs serve `image/*`, so PNG/GIF embed inline in PRs).
 
+> **Agents:** `.claude/skills/gha-sandbox/SKILL.md` is the compact how-to (workflows, evidence flow, profiles, gotchas).
+
 ## Status (target: pingdotgg/t3code)
 
 | Platform | Workflow | State |
