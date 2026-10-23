@@ -10,7 +10,7 @@ import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { ScenarioError, runSteps } from "../lib/ir.mjs";
 import { controlDir } from "../lib/hold.mjs";
 import { makeLog } from "../lib/log.mjs";
-import { abortError, makePace } from "../lib/pace.mjs";
+import { abortError, makePace, sleep } from "../lib/pace.mjs";
 import { dequeue } from "../lib/queue.mjs";
 import { parseTag, promptText, userRequest } from "../lib/select.mjs";
 import { textGenJson } from "../lib/textgen.mjs";
@@ -77,7 +77,7 @@ const threadObject = (t) => ({
   extra: null,
   sessionId: t.id,
   forkedFromId: t.forkedFromId ?? null,
-  parentThreadId: null,
+  parentThreadId: t.parentThreadId ?? null,
   preview: t.history[0] ?? "",
   ephemeral: false,
   section: null,
@@ -98,8 +98,8 @@ const threadObject = (t) => ({
   source: "vscode",
   canAcceptDirectInput: true,
   threadSource: null,
-  agentNickname: null,
-  agentRole: null,
+  agentNickname: t.agentNickname ?? null,
+  agentRole: t.agentRole ?? null,
   gitInfo: null,
   name: null,
   daybreakEnabled: null,
@@ -142,6 +142,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
   let nextTool = 0;
   let nextItem = 0;
   let nextProc = 4000;
+  const resetCredits = { available: Number(env.MOCK_CODEX_RESET_CREDITS ?? 2) };
   const stateDir = join(controlDir({ ...process.env, ...env }), "codex-threads");
 
   const write = (obj) => {
@@ -169,7 +170,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
   const persist = (t) => {
     try {
       mkdirSync(stateDir, { recursive: true });
-      writeFileSync(join(stateDir, `${t.id}.json`), JSON.stringify({ id: t.id, cwd: t.cwd, model: t.model, turn: t.turn, history: t.history, createdAt: t.createdAt, tokens: t.tokens, turns: t.turns }));
+      writeFileSync(join(stateDir, `${t.id}.json`), JSON.stringify({ id: t.id, cwd: t.cwd, model: t.model, turn: t.turn, history: t.history, createdAt: t.createdAt, tokens: t.tokens, turns: t.turns, goal: t.goal, parentThreadId: t.parentThreadId, agentNickname: t.agentNickname, agentRole: t.agentRole }));
     } catch {}
   };
   function newThread({ id = randomUUID(), cwd, model, restore = true }) {
@@ -184,6 +185,10 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
       createdAt: saved?.createdAt ?? nowSec(),
       tokens: saved?.tokens ?? { input: 0, output: 0, cached: 0 },
       turns: saved?.turns ?? [],
+      goal: saved?.goal ?? null,
+      parentThreadId: saved?.parentThreadId ?? null,
+      agentNickname: saved?.agentNickname ?? null,
+      agentRole: saved?.agentRole ?? null,
       abort: null,
       activeTurnId: null,
       approvalPolicy: "on-request",
@@ -193,10 +198,27 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
     return t;
   }
 
+  // ---- thread goal (`/goal <objective>` in T3 -> thread/goal/set; IR step `goal` updates it) --------
+  const emitGoal = (t, turnId = null) => {
+    if (!t.goal) return;
+    t.goal.updatedAt = nowSec();
+    notify("thread/goal/updated", { threadId: t.id, turnId, goal: { ...t.goal } });
+    persist(t);
+  };
+
   // ---- IR sink -> Codex items ------------------------------------------------------------------
   function makeTurnRuntime(t, turnId, signal) {
     const items = []; // completed items (turn/completed summary)
     const tools = new Map();
+    // server -> client request; always resolved with serverRequest/resolved (T3 clears the pending card on it)
+    const clientRequest = async (method, params) => {
+      const reqId = nextOutId;
+      try {
+        return await callClient(method, params, signal);
+      } finally {
+        notify("serverRequest/resolved", { threadId: t.id, requestId: reqId });
+      }
+    };
     let open = null; // open agentMessage | reasoning item
     let outChars = 0;
     const emitStart = (item) => notify("item/started", { item, threadId: t.id, turnId, startedAtMs: Date.now() });
@@ -208,7 +230,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
       if (!open) return;
       const o = open;
       open = null;
-      if (o.type === "agentMessage") emitDone({ type: "agentMessage", id: o.id, text: o.text, phase: "final_answer", memoryCitation: null, delivery: null, questions: null });
+      if (o.type === "agentMessage") emitDone({ type: "agentMessage", id: o.id, text: o.text, phase: o.phase, memoryCitation: null, delivery: null, questions: null });
       else emitDone({ type: "reasoning", id: o.id, summary: [o.text], content: [] });
     };
     const cmdItem = (id, command, actions, status, extra = {}) => ({
@@ -229,11 +251,13 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
     });
     const relPath = (p) => (p && isAbsolute(p) ? relative(t.cwd, p) || p : p);
     const sink = {
-      message(text) {
+      message(text, o = {}) {
+        const phase = o.phase === "commentary" ? "commentary" : "final_answer";
+        if (open?.type === "agentMessage" && open.phase !== phase) closeOpen();
         if (open?.type !== "agentMessage") {
           closeOpen();
-          open = { type: "agentMessage", id: `msg_mock_${++nextItem}`, text: "" };
-          emitStart({ type: "agentMessage", id: open.id, text: "", phase: "final_answer", memoryCitation: null, delivery: null, questions: null });
+          open = { type: "agentMessage", id: `msg_mock_${++nextItem}`, text: "", phase };
+          emitStart({ type: "agentMessage", id: open.id, text: "", phase, memoryCitation: null, delivery: null, questions: null });
         }
         open.text += text;
         outChars += text.length;
@@ -273,7 +297,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
           const cmd = inp.command ?? x.title;
           item = cmdItem(x.id, `/bin/bash -lc ${esc(cmd)}`, [{ type: "unknown", command: cmd }], "inProgress");
         } else {
-          item = { type: "mcpToolCall", id: x.id, server: "mockkit", tool: String(x.title ?? "tool").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "tool", status: "inProgress", arguments: inp, result: null, error: null, durationMs: null };
+          item = { type: "mcpToolCall", id: x.id, server: x.server ?? "mockkit", tool: x.name ?? (String(x.title ?? "tool").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "tool"), status: "inProgress", arguments: inp, result: null, error: null, durationMs: null };
         }
         tools.set(x.id, { item, startedAt: Date.now(), sent: 0, declined: false });
         emitStart(item);
@@ -328,7 +352,16 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         const startedAtMs = Date.now();
         let method;
         let params;
-        if (rec?.item.type === "fileChange") {
+        if (env.MOCK_CODEX_LEGACY_APPROVALS === "1") {
+          // Pre-v2 server requests (T3 still answers them): execCommandApproval / applyPatchApproval, keyed by conversationId.
+          if (rec?.item.type === "fileChange") {
+            method = "applyPatchApproval";
+            params = { conversationId: t.id, callId: p.id, fileChanges: Object.fromEntries(rec.item.changes.map((c) => [c.path, c.kind.type === "add" ? { type: "add", content: c.diff } : { type: "update", unified_diff: c.diff, move_path: null }])), reason: null, grantRoot: null };
+          } else {
+            method = "execCommandApproval";
+            params = { conversationId: t.id, callId: p.id, approvalId: null, command: ["/bin/bash", "-lc", rec?.item?.command ?? p.title], cwd: t.cwd, parsedCmd: [], reason: null };
+          }
+        } else if (rec?.item.type === "fileChange") {
           method = "item/fileChange/requestApproval";
           params = { threadId: t.id, turnId, itemId: p.id, startedAtMs, reason: null, grantRoot: null };
         } else {
@@ -360,7 +393,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         notify("serverRequest/resolved", { threadId: t.id, requestId: reqId });
         const d = res?.decision;
         const name = typeof d === "string" ? d : d && typeof d === "object" ? Object.keys(d)[0] : "";
-        if (/^cancel$/i.test(name)) return "cancel";
+        if (/^cancel$/i.test(name) || (method === "execCommandApproval" || method === "applyPatchApproval" ? /^abort$/i.test(name) : false)) return "cancel";
         if (/^(decline|denied|abort)/i.test(name)) {
           if (rec) rec.declined = true;
           return "reject";
@@ -398,6 +431,104 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         const answers = {};
         for (const [k, v] of Object.entries(res?.answers ?? {})) answers[k] = Array.isArray(v) ? v : (v?.answers ?? []);
         return { answers };
+      },
+      // ---- Codex-only IR ops (see lib/ir.mjs) ----
+      async elicit(p) {
+        // Codex with approvalPolicy "never" does not ask about MCP tool use either.
+        if (t.approvalPolicy === "never") return "accept";
+        closeOpen();
+        const persist = p.persist ?? ["session", "always"];
+        const res = await clientRequest("mcpServer/elicitation/request", {
+          threadId: t.id,
+          turnId,
+          serverName: p.server ?? "mockkit",
+          mode: "form",
+          message: p.message,
+          _meta: { ...(p.appName ? { app_name: p.appName } : {}), codex_approval_kind: "mcp_tool_call", ...(persist.length ? { persist } : {}) },
+          requestedSchema: { type: "object", properties: {} },
+        });
+        if (res?.action === "cancel") return "cancel";
+        if (res?.action !== "accept") return "decline";
+        const per = res?._meta?.persist;
+        return per === "session" ? "acceptForSession" : per === "always" ? "acceptAlways" : "accept";
+      },
+      async grant(p) {
+        if (t.approvalPolicy === "never") return "allow";
+        closeOpen();
+        const abs = (x) => (isAbsolute(x) ? x : resolve(t.cwd, x));
+        const permissions = {};
+        if (p.read?.length || p.write?.length) permissions.fileSystem = { ...(p.read?.length ? { read: p.read.map(abs) } : {}), ...(p.write?.length ? { write: p.write.map(abs) } : {}) };
+        if (p.network) permissions.network = { enabled: true };
+        const res = await clientRequest("item/permissions/requestApproval", {
+          threadId: t.id,
+          turnId,
+          itemId: p.id,
+          startedAtMs: Date.now(),
+          environmentId: "local",
+          cwd: t.cwd,
+          reason: p.reason ?? null,
+          permissions,
+        });
+        const g = res?.permissions ?? {};
+        return g.fileSystem?.read?.length || g.fileSystem?.write?.length || g.network?.enabled ? "allow" : "reject";
+      },
+      // Spawn an agent: a collabAgentToolCall spawnAgent item registers a child thread in T3, the child then runs its own
+      // turn (own threadId/turnId, its items stream with the child ids), and a `wait` item reports the child's final state.
+      async subagent(a, runChild) {
+        closeOpen();
+        const child = newThread({ cwd: t.cwd, model: a.model ?? t.model, restore: false });
+        child.parentThreadId = t.id;
+        child.agentNickname = a.name ?? "worker";
+        child.agentRole = a.role ?? "worker";
+        child.approvalPolicy = t.approvalPolicy;
+        const base = { type: "collabAgentToolCall", senderThreadId: t.id, prompt: a.prompt ?? "", model: a.model ?? null, reasoningEffort: null };
+        const spawn = { ...base, id: a.id, tool: "spawnAgent" };
+        emitStart({ ...spawn, status: "inProgress", receiverThreadIds: [], agentsStates: {} });
+        await sleep(pace.toolMs, signal);
+        emitDone({ ...spawn, status: "completed", receiverThreadIds: [child.id], agentsStates: { [child.id]: { status: "running", message: null } } });
+        notify("thread/started", { thread: threadObject(child) });
+        const childTurnId = randomUUID();
+        const cStart = nowSec();
+        const shell = (status, extra = {}) => ({ id: childTurnId, items: [], itemsView: "notLoaded", status, error: null, startedAt: cStart, completedAt: null, durationMs: null, ...extra });
+        notify("thread/status/changed", { threadId: child.id, status: { type: "active", activeFlags: [] } });
+        notify("turn/started", { threadId: child.id, turn: shell("inProgress") });
+        const crt = makeTurnRuntime(child, childTurnId, signal);
+        let status = "completed";
+        try {
+          await runChild(a.steps ?? [], crt.sink);
+        } catch (e) {
+          if (e?.name === "AbortError" || signal?.aborted) status = "interrupted";
+          else throw e;
+        }
+        crt.closeOpen();
+        notify("thread/status/changed", { threadId: child.id, status: { type: "idle" } });
+        const cDone = nowSec();
+        child.turns.push({ id: childTurnId, prompt: a.prompt ?? "", items: crt.items, status });
+        persist(child);
+        notify("turn/completed", { threadId: child.id, turn: shell(status, { items: crt.items, itemsView: "summary", completedAt: cDone, durationMs: Math.max(1, (cDone - cStart) * 1000) }) });
+        const last = [...crt.items].reverse().find((i) => i.type === "agentMessage");
+        const waitItem = { ...base, prompt: null, model: null, id: `${a.id}-wait`, tool: "wait", receiverThreadIds: [child.id] };
+        emitStart({ ...waitItem, status: "inProgress", agentsStates: { [child.id]: { status: "running", message: null } } });
+        emitDone({ ...waitItem, status: "completed", agentsStates: { [child.id]: { status: status === "completed" ? "completed" : "interrupted", message: a.result ?? last?.text ?? null } } });
+        if (status === "interrupted") throw abortError();
+      },
+      goal(a) {
+        const g = t.goal;
+        if (!g) return; // /goal sets one; nothing to update otherwise
+        if (a.status) g.status = a.status;
+        if (typeof a.tokensUsed === "number") g.tokensUsed = a.tokensUsed;
+        if (typeof a.timeUsedSeconds === "number") g.timeUsedSeconds = a.timeUsedSeconds;
+        emitGoal(t, turnId);
+      },
+      async web(x) {
+        closeOpen();
+        const item = { type: "webSearch", id: x.id, query: x.query, action: { type: "search", query: x.query, queries: null }, results: null };
+        emitStart(item);
+        await sleep(pace.toolMs, signal);
+        emitDone(x.url ? { ...item, action: { type: "openPage", url: x.url } } : item);
+      },
+      retry(r) {
+        notify("error", { threadId: t.id, turnId, willRetry: true, error: { message: r.message ?? `Reconnecting... ${r.attempt}/${r.max}`, codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } }, additionalDetails: null } });
       },
     };
     return { sink, closeOpen, items, outChars: () => outChars };
@@ -480,6 +611,12 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
     const outTok = Math.ceil(rt.outChars() / 4);
     t.tokens = { input: t.tokens.input + inTok, output: t.tokens.output + outTok, cached: t.tokens.cached + Math.floor(inTok * 0.6) };
     const usage = (inp, out, cached) => ({ totalTokens: inp + out, inputTokens: inp, cachedInputTokens: cached, cacheWriteInputTokens: 0, outputTokens: out, reasoningOutputTokens: 0 });
+    if (t.goal?.status === "active") {
+      // an active goal accrues usage per turn (the Goal banner reads tokensUsed / timeUsedSeconds)
+      t.goal.tokensUsed += inTok + outTok;
+      t.goal.timeUsedSeconds += Math.max(1, nowSec() - startedAt);
+      emitGoal(t, turnId);
+    }
     notify("thread/tokenUsage/updated", {
       threadId: t.id,
       turnId,
@@ -559,12 +696,33 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
             mkdirSync(home, { recursive: true });
             writeFileSync(join(home, "models_cache.json"), JSON.stringify({ fetched_at: new Date().toISOString(), models: [] }));
           } catch {}
-          return reply(id, { account: { type: "chatgpt", email: "mock@example.com", planType: "plus" }, requiresOpenaiAuth: false });
+          return reply(id, { account: { type: "chatgpt", email: "mock@example.com", planType: env.MOCK_CODEX_PLAN || "plus" }, requiresOpenaiAuth: false });
         }
         return reply(id, { account: { type: "apiKey" }, requiresOpenaiAuth: false });
       }
-      case "account/rateLimits/read":
-        return reply(id, { rateLimits: { limitId: "codex", limitName: null, planType: "plus", primary: { usedPercent: 23, windowDurationMins: 300, resetsAt: nowSec() + 2 * 3600 }, secondary: { usedPercent: 41, windowDurationMins: 10080, resetsAt: nowSec() + 5 * 86400 } }, rateLimitsByLimitId: null });
+      case "account/rateLimits/read": {
+        // MOCK_CODEX_ACCOUNT=chatgpt adds what a subscription account reports: account id, reset credits, a 5h + weekly window.
+        const chat = env.MOCK_CODEX_ACCOUNT === "chatgpt";
+        const plan = env.MOCK_CODEX_PLAN || "plus";
+        const snap = { limitId: "codex", limitName: null, planType: plan, primary: { usedPercent: 23, windowDurationMins: 300, resetsAt: nowSec() + 2 * 3600 }, secondary: { usedPercent: 41, windowDurationMins: 10080, resetsAt: nowSec() + 5 * 86400 } };
+        return reply(id, {
+          rateLimits: snap,
+          rateLimitsByLimitId: null,
+          ...(chat
+            ? {
+                accountId: "acct_mockkit_0001",
+                rateLimitResetCredits: resetCredits.available
+                  ? { availableCount: resetCredits.available, credits: Array.from({ length: resetCredits.available }, (_, i) => ({ id: `credit_${i + 1}`, status: "available", resetType: "codexRateLimits", grantedAt: nowSec() - 86400, expiresAt: nowSec() + (10 + i) * 86400, title: "Rate limit reset", description: "Resets your 5 hour and weekly Codex limits" })) }
+                  : { availableCount: 0, credits: [] },
+              }
+            : {}),
+        });
+      }
+      case "account/rateLimitResetCredit/consume": {
+        if (resetCredits.available <= 0) return reply(id, { outcome: "noCredit" });
+        resetCredits.available -= 1;
+        return reply(id, { outcome: "reset" });
+      }
       case "skills/list":
         return reply(id, { data: (params.cwds ?? [process.cwd()]).map((cwd) => ({ cwd, skills: [], errors: [] })) });
       case "model/list":
@@ -600,8 +758,32 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         notify("thread/started", { thread: threadObject(t) });
         return;
       }
-      case "thread/turns/list":
-        return reply(id, { data: turnObjects(threads.get(params.threadId) ?? newThread({ id: params.threadId })), nextCursor: null });
+      case "thread/turns/list": {
+        const t = threads.get(params.threadId) ?? newThread({ id: params.threadId });
+        // T3's rollback pages newest-first (sortDirection "desc", limit n); default stays oldest-first.
+        let list = turnObjects(t);
+        if (params.sortDirection === "desc") list = list.reverse();
+        const start = Number(params.cursor) || 0;
+        const limit = Number(params.limit) > 0 ? Number(params.limit) : list.length;
+        return reply(id, { data: list.slice(start, start + limit), nextCursor: start + limit < list.length ? String(start + limit) : null });
+      }
+      case "thread/revert":
+      case "thread/rollback": {
+        // revert: drop `beforeTurnId` and every later turn; rollback: drop the last `numTurns`.
+        const t = threads.get(params.threadId) ?? newThread({ id: params.threadId });
+        let n;
+        if (method === "thread/revert") {
+          const idx = t.turns.findIndex((x) => x.id === params.beforeTurnId);
+          if (idx < 0) return fail(id, -32602, `Unknown turn ${params.beforeTurnId}`);
+          n = t.turns.length - idx;
+        } else n = Math.max(0, Number(params.numTurns) || 0);
+        if (t.activeTurnId) return fail(id, -32600, "Cannot roll back while a turn is running");
+        t.turns.splice(Math.max(0, t.turns.length - n));
+        t.history = t.history.slice(0, t.turns.length);
+        t.turn = t.turns.length;
+        persist(t);
+        return reply(id, { thread: { ...threadObject(t), turns: turnObjects(t) } });
+      }
       case "thread/compact/start": {
         reply(id, {});
         await compact(threads.get(params.threadId) ?? newThread({ id: params.threadId }));
@@ -617,10 +799,32 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         return reply(id, { turnId: params.expectedTurnId ?? threads.get(params.threadId)?.activeTurnId ?? "" });
       case "thread/unsubscribe":
         return reply(id, { status: "unsubscribed" });
-      case "thread/goal/get":
-        return reply(id, { goal: null });
-      case "thread/goal/clear":
-        return reply(id, { cleared: false });
+      case "thread/goal/get": {
+        const t = threads.get(params.threadId) ?? newThread({ id: params.threadId });
+        return reply(id, { goal: t.goal ? { ...t.goal } : null });
+      }
+      case "thread/goal/set": {
+        const t = threads.get(params.threadId) ?? newThread({ id: params.threadId });
+        if (typeof params.objective === "string" && params.objective.trim()) {
+          const at = nowSec();
+          t.goal = { threadId: t.id, objective: params.objective.trim(), status: params.status ?? "active", tokenBudget: params.tokenBudget ?? null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: at, updatedAt: at };
+        } else if (t.goal) {
+          if (params.status) t.goal.status = params.status;
+          if (params.tokenBudget !== undefined) t.goal.tokenBudget = params.tokenBudget;
+        } else return fail(id, -32602, "No goal to update");
+        reply(id, { goal: { ...t.goal } });
+        emitGoal(t, t.activeTurnId);
+        return;
+      }
+      case "thread/goal/clear": {
+        const t = threads.get(params.threadId) ?? newThread({ id: params.threadId });
+        const had = Boolean(t.goal);
+        t.goal = null;
+        persist(t);
+        reply(id, { cleared: had });
+        if (had) notify("thread/goal/cleared", { threadId: t.id });
+        return;
+      }
       case "thread/inject_items":
       case "thread/backgroundTerminals/terminate":
       case "thread/unarchive":
