@@ -42,6 +42,8 @@ use_provider() {
 export MOCK_CONTROL_DIR=${RUNNER_TEMP:-/tmp}/mockkit-live/control
 export MOCK_LOG="$out/mock.ndjson"
 export MOCK_PACE=${MOCK_PACE:-real}
+# slow runners: CLI polls + UI dumps (and the remount fallbacks below) can take minutes between a hold being reached and released
+export MOCK_HOLD_TIMEOUT_MS=${MOCK_HOLD_TIMEOUT_MS:-900000}
 export MOCK_KEEP_OTHER_PROVIDERS=1
 export MOCK_DEFAULT_RUNTIME_MODE=approval-required
 rm -rf "$MOCK_CONTROL_DIR"; mkdir -p "$MOCK_CONTROL_DIR"

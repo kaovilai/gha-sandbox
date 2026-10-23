@@ -25,6 +25,7 @@ const env = (extra = {}) =>
     MOCK_LOG: process.env.MOCK_LOG ?? "/tmp/mockkit/mock.ndjson",
     MOCK_CONTROL_DIR: process.env.MOCK_CONTROL_DIR ?? "/tmp/mockkit/control",
     MOCK_NODE: process.execPath,
+    ...(process.env.MOCK_HOLD_TIMEOUT_MS ? { MOCK_HOLD_TIMEOUT_MS: process.env.MOCK_HOLD_TIMEOUT_MS } : {}),
     ...extra,
   }).map(([name, value]) => ({ name, value }));
 
