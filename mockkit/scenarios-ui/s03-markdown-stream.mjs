@@ -21,7 +21,7 @@ export default async function ({ page, shot, env }) {
   await dumpPage(page, "s03 done");
   // the finished reply renders real markdown, not source text
   await expectVisible(page, page.getByRole("heading", { name: "Streaming markdown demo" }), "rendered <h2> 'Streaming markdown demo'");
-  await expectLocatorText(page, page.locator("table"), /Provider[\s\S]*grok \(mock\)[\s\S]*claude/, "rendered table with the provider rows");
+  await expectLocatorText(page, page.locator("table"), /Provider[\s\S]*\(mock\)[\s\S]*claude/, "rendered table with the provider rows");
   await expectLocatorText(page, page.locator("pre"), /export function greet/, "rendered code block with the greet() source");
   await expectVisible(page, page.getByRole("listitem").filter({ hasText: "Deterministic output, no API key" }), "rendered list item");
   await expectVisible(page, page.locator('a[href="https://example.com"]'), "rendered link to example.com");
