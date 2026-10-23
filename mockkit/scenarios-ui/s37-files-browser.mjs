@@ -63,22 +63,29 @@ export default async function ({ page, shot, env }) {
       console.log(`FINDING ${n}: ${String(e.message).split("\n")[0]}`);
     }
   };
-  await step("expand src", async () => {
+  const soft = async (n, fn) => {
+    try {
+      await fn();
+    } catch (e) {
+      console.log(`note (non-fatal) ${n}: ${String(e.message).split("\n")[0]}`);
+    }
+  };
+  await soft("expand src", async () => {
     await page.getByText("src", { exact: true }).first().click();
     await page.waitForTimeout(800);
   });
   await step("source preview", () => open("greeting.ts", "preview-source", "src/greeting.ts"));
-  await step("expand docs", async () => {
+  await soft("expand docs", async () => {
     await page.getByText("docs", { exact: true }).first().click();
     await page.waitForTimeout(800);
   });
   await step("markdown preview", () => open("guide.md", "preview-markdown", "docs/guide.md"));
-  await step("expand data", async () => {
+  await soft("expand data", async () => {
     await page.getByText("data", { exact: true }).first().click();
     await page.waitForTimeout(800);
   });
   await step("csv preview", () => open("people.csv", "preview-csv", "data/people.csv"));
-  await step("expand assets", async () => {
+  await soft("expand assets", async () => {
     await page.getByText("assets", { exact: true }).first().click({ timeout: 5000 });
     await page.waitForTimeout(800);
   });

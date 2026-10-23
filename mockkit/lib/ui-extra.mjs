@@ -27,7 +27,7 @@ export function seedInstances(env, instances) {
       ...(o.displayName ? { displayName: o.displayName } : {}),
       ...(o.accentColor ? { accentColor: o.accentColor } : {}),
       enabled: o.enabled ?? true,
-      environment: Object.entries({ ...base, MOCK_CLI_MODE: o.mode ?? "ready" }).map(([name, value]) => ({ name, value })),
+      environment: Object.entries({ ...base, MOCK_CLI_MODE: o.mode ?? "ready", ...(o.env ?? {}) }).map(([name, value]) => ({ name, value: String(value) })),
       config: { binaryPath: o.binaryPath ?? LAUNCHER },
     };
   }
@@ -54,7 +54,30 @@ export function seedUpstreamAcp(env, id, displayName, flags = {}) {
   console.log(`seeded upstream acp instance ${id} (${displayName}) -> ${agent}; node ${process.version}`);
 }
 
-export const gotoPath =async (page, path) => {
+// Grok-driver instance whose agent is the UPSTREAM acp-mock-agent.ts (via mock-cli.sh MOCK_UPSTREAM_AGENT) with T3_ACP_* flags.
+// Unlike the acpRegistry flavor, the grok driver understands the xAI extension frames (rate limit, background tasks, ...).
+export function seedUpstreamGrok(env, id, displayName, flags = {}) {
+  const agent = join(process.env.MOCKKIT_TARGET, "apps/server/scripts/acp-mock-agent.ts");
+  if (!existsSync(agent)) throw new Error(`upstream mock agent missing: ${agent}`);
+  seedInstances(env, { [id]: { displayName, env: { MOCK_UPSTREAM_AGENT: agent, ...flags } } });
+}
+
+// Open the model picker (Ctrl+Shift+M), choose provider instance <displayName> and its first model.
+export async function pickInstance(page, displayName, { shot } = {}) {
+  await page.keyboard.press("Control+Shift+M");
+  await page.waitForTimeout(1200);
+  const btn = page.getByRole("button", { name: displayName }).first();
+  await must(page, btn, `provider ${displayName} in model picker`, 30_000);
+  await btn.click();
+  await page.waitForTimeout(900);
+  await shot?.("picker-instance");
+  await page.getByText("Mock Build", { exact: true }).first().click();
+  await page.waitForTimeout(800);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(500);
+}
+
+export const gotoPath = async (page, path) => {
   await page.goto(new URL(path, page.url()).href, { waitUntil: "load" });
   await page.waitForTimeout(1500);
 };

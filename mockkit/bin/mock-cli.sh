@@ -43,6 +43,10 @@ esac
 
 for a in "$@"; do
   if [ "$a" = agent ]; then
+    # MOCK_UPSTREAM_AGENT=<path to t3code apps/server/scripts/acp-mock-agent.ts>: serve the upstream mock (T3_ACP_* flags) instead.
+    if [ -n "${MOCK_UPSTREAM_AGENT:-}" ]; then
+      exec "$NODE" --experimental-strip-types --no-warnings "$MOCK_UPSTREAM_AGENT"
+    fi
     exec "$NODE" "$HERE/t3-mock-acp.mjs"
   fi
 done

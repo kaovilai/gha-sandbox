@@ -84,7 +84,8 @@ export default async function ({ page, shot, env }) {
     await shot("renamed");
   });
   await step("archive", async () => {
-    await openMenu("Bravo thread");
+    // Bravo is in the collapsed "Settled" section, so archive the visible (pinned, renamed) first thread
+    await openMenu("Renamed alpha thread");
     await clickItem(/^Archive thread$/);
     await page.waitForTimeout(800);
     await shot("archived-undo-notice");
