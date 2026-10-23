@@ -63,6 +63,8 @@ async function warmLoop() {
 
 const server = http.createServer(async (req, res) => {
   const t0 = Date.now();
+  console.log(`REQ ${req.method} ${(req.url ?? "").slice(0, 110)} ua=${(req.headers["user-agent"] ?? "").slice(0, 40)}`);
+  res.on("close", () => console.log(`CLOSE ${req.method} ${(req.url ?? "").slice(0, 60)} after ${Date.now() - t0}ms`));
   res.on("finish", () =>
     console.log(`${req.method} ${(req.url ?? "").slice(0, 110)} -> ${res.statusCode} ${Date.now() - t0}ms`),
   );
