@@ -88,6 +88,10 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Native-inputs hash (computed once; the build itself touches some of these files)
+        id: native
+        run: echo "hash=${{ hashFiles('target/pnpm-lock.yaml','target/apps/mobile/app.config.ts','target/apps/mobile/package.json','target/apps/mobile/plugins/**','target/apps/mobile/modules/**','target/patches/**') }}" >> "$GITHUB_OUTPUT"
+
       - name: Metro cache dirs
         id: metro
         run: |
@@ -112,7 +116,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: target/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
-          key: android-apk-${{ hashFiles('target/pnpm-lock.yaml','target/apps/mobile/app.config.ts','target/apps/mobile/package.json','target/apps/mobile/plugins/**','target/apps/mobile/modules/**','target/patches/**') }}
+          key: android-apk-${{ steps.native.outputs.hash }}
 
       - name: AVD cache (snapshot boots in seconds instead of minutes)
         id: avd-cache
@@ -159,7 +163,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: target/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
-          key: android-apk-${{ hashFiles('target/pnpm-lock.yaml','target/apps/mobile/app.config.ts','target/apps/mobile/package.json','target/apps/mobile/plugins/**','target/apps/mobile/modules/**','target/patches/**') }}
+          key: android-apk-${{ steps.native.outputs.hash }}
 
       - name: Report cache dir sizes (verifies Metro cache path guesses)
         if: always()
