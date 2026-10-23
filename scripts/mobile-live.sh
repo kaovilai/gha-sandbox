@@ -194,7 +194,13 @@ open_thread() { # <title>
     wait_ui "$title" 60 "list-toggle-$navs" >/dev/null || return 1
   fi
   sleep 1
-  tap_re "$title" 20 "open-$navs"
+  # a running thread's list row animates ("Working Ns"): uiautomator then often returns an empty tree. If the tap target cannot be
+  # found, re-toggle the scene (thread -> threads; never BACK, which from the list leaves the app) and retry once.
+  tap_re "$title" 30 "open-$navs" && return 0
+  log "tap on '$title' failed; toggling scene thread -> threads and retrying"
+  write_scene thread; sleep 8; write_scene threads
+  sleep 2
+  tap_re "$title" 60 "open-retry-$navs"
 }
 
 results=()
