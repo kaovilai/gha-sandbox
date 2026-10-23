@@ -12,6 +12,10 @@ on:
       ref:
         description: Ref (branch/sha, or pull/<N>/head)
         default: main
+      keep_running:
+        description: Keep simulator+Metro after capture and record a scroll clip (else record throughout, trim last 15 s)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,6 +27,7 @@ jobs:
     env:
       NODE_OPTIONS: --max-old-space-size=6144
       OUT_DIR: ${{ github.workspace }}/out/ios-app
+      IOS_KEEP_RUNNING: ${{ inputs.keep_running && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,6 +58,11 @@ jobs:
           npm install -g "pnpm@$pnpm_version"
           echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
           pnpm --version
+
+      - name: Setup ffmpeg (trim recording)
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          github-token: ${{ github.token }}
 
       - name: Install AXe (simulator lock + notification prompt)
         run: |

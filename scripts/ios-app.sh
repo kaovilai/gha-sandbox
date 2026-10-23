@@ -32,17 +32,30 @@ perl -pi -e 's/const metroUrl = `http:\/\/\$\{metroHost\}:\$\{config\.metroPort\
 grep -q 'metroHost}:8200?' scripts/mobile-showcase.ts || echo "WARN: metroUrl proxy patch did not apply"
 node "$root/scripts/metro-manifest-proxy.mjs" > "$out/diag/proxy.log" 2>&1 &
 diag2=$!
-# File redirect, not a pipe: --keep-running leaves Metro alive holding stdout, which would
-# keep `| tee` from ever seeing EOF.
-pnpm screenshots:mobile "${args[@]}" --keep-running > "$out/pass1.log" 2>&1
-rc1=$?
+# Output goes to a file, not a pipe: with --keep-running, Metro stays alive holding stdout and
+# would keep `| tee` from ever seeing EOF.
+if [ "${IOS_KEEP_RUNNING:-0}" = 1 ]; then
+  pnpm screenshots:mobile "${args[@]}" --keep-running > "$out/pass1.log" 2>&1
+  rc1=$?
+else
+  # Record the whole run from first boot; the last seconds (final capture) are trimmed below.
+  ( until xcrun simctl list devices | grep -q '(Booted)'; do sleep 2; done
+    xcrun simctl io booted recordVideo --codec h264 --force "$out/full.mp4" ) &
+  pnpm screenshots:mobile "${args[@]}" > "$out/pass1.log" 2>&1
+  rc1=$?
+  pkill -INT -f 'simctl io booted recordVideo' || true
+  sleep 5
+  if [ -s "$out/full.mp4" ]; then
+    ffmpeg -nostdin -loglevel error -y -sseof -15 -i "$out/full.mp4" -c copy "$out/recording.mp4" || true
+    rm -f "$out/full.mp4" "$out"/full.mp4.sb-* 2>/dev/null || true
+  fi
+fi
 tail -40 "$out/pass1.log" | cut -c1-200
 mkdir -p "$out/screenshots"
 cp -r artifacts/app-store/screenshots/apple/. "$out/screenshots/" 2>/dev/null || true
 
-if [ "$rc1" -eq 0 ]; then
-  # A second full showcase pass (Metro restart + re-warm) hung on 3 vCPUs. Instead record a short
-  # clip from the still-running simulator while AXe scrolls the app.
+if [ "$rc1" -eq 0 ] && [ "${IOS_KEEP_RUNNING:-0}" = 1 ]; then
+  # Record a short clip from the still-running simulator while AXe scrolls the app.
   udid=$(xcrun simctl list devices booted -j | jq -r '[.devices[][] | select(.state=="Booted")][0].udid // empty')
   if [ -n "$udid" ]; then
     xcrun simctl io "$udid" recordVideo --codec h264 --force "$out/recording.mp4" &
