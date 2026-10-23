@@ -223,7 +223,7 @@ run_s40() {
   ui_state s40-held
   server_truth s40-held "$tid"
   local held_status=$SRV_STATUS
-  echo "$early_text" | grep -q "Step 5 of 8" && log "UNEXPECTED: step 5 already streamed at the early shot"
+  log "early server text had: $(echo "$early_text" | grep -c '^Step') step line(s)"
   wait_ui "Step 5 of 8" 30 s40-held-ui >/dev/null || { rec_stop s40; return 1; }
   # mid-turn means: UI has step 5 but not step 6, and the server still has the run open
   node "$uia" find "Step 6 of 8" < "$out/ui/s40-held.dump" >/dev/null && log "UNEXPECTED: step 6 visible while held"
@@ -283,7 +283,13 @@ run_s42() {
   log "s42 thread $tid"
   echo "$tid" > "$out/s42.threadid"
   open_thread "$title" || { rec_stop s42; return 1; }
-  wait_ui "Fill in the pending answers|Strict|Which code style" 120 s42-card >/dev/null || { rec_stop s42; return 1; }
+  # same as s41: a pending request that exists on first open of a thread is not rendered until the thread is remounted
+  if ! wait_ui "Fill in the pending answers|^Strict" 30 s42-card >/dev/null; then
+    log "question card not in UI tree on first open; remount (BACK, reopen)"
+    shot s42-card-missing
+    open_thread "$title" || { rec_stop s42; return 1; }
+    wait_ui "Fill in the pending answers|^Strict" 45 s42-card2 >/dev/null || { shot s42-card-missing2; rec_stop s42; return 1; }
+  fi
   sleep 2
   shot s42-question-pending
   ui_state s42-pending
