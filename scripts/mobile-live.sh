@@ -283,7 +283,7 @@ run_s41() {
   ui_state s41-pending
   server_truth s41-pending "$tid"
   [ -e "$ws/NOTES.md" ] && log "UNEXPECTED: NOTES.md exists before approval"
-  tap_re "^Approve$" 20 s41-approve || { rec_stop s41; return 1; }
+  tap_re "^(Approve|Allow once)$" 20 s41-approve || { rec_stop s41; return 1; }
   wait_server "$tid" "Approved" 90 || { shot s41-no-resolution; rec_stop s41; return 1; }
   sleep 4
   shot s41-approval-resolved

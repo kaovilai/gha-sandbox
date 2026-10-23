@@ -226,6 +226,22 @@ Frame shapes come from the upstream recorded transcripts (`orchestration-v2/test
   echo answer, same as Grok. Sidebar thread titles come from the prompt text, not the scenario title (hidden routing has no tag). Real `codex` behaviour that depends on a
   model (planning, tool choice) is not simulated.
 
+## Codex everywhere (desktop + mobile) [track codex-everywhere]
+
+`desktop-linux.yml`, `android-app.yml`, `ios-app.yml` take `-f mock_provider=grok|codex|both` (default `grok` = unchanged), exported as `MOCK_PROVIDER`.
+
+* **Desktop** (`mock=true`): `targets/t3code-mock/desktop-scenario.mjs` -> `lib/resolve.mjs` (unit-tested). `codex`: every driver runs against the Codex mock, files named
+  `codex-<driver>-*.png|mp4|gif`. `both`: each driver twice (Grok, then Codex). `@codex` per token and codex-named packs (`codex`, `desktop-codex`) still win over the input.
+  Pack `desktop-codex` = pack `desktop` (s03, s08, s06, dk01-dk03) forced to Codex. `seed/settings.mjs` sees the per-scenario `MOCK_PROVIDER`; `bin/desktop-electron.mjs` just inherits it.
+  `lib/desktop.mjs` readiness accepts `app-server` in `probes.log` (the Codex launcher never receives `models`).
+* **Mobile live** (`live=true`): `scripts/mobile-live.sh` seeds the showcase server with `MOCK_PROVIDER`, then starts threads with `--provider codex --model gpt-6-astra`
+  (titles "Codex live stream" / "Codex approval" / "Codex question"). Codex pass output goes to `live/codex/` (published as `live__codex__s40-*.png`, results `codex-s40=ok`);
+  `both` runs the Grok pass, then the Codex pass on the same server and app. Every `server_truth` checks `thread.providerInstanceId` equals the pass provider (mismatch fails the scenario).
+  Codex approval card buttons are `Allow once`, `Allow session`, `Decline` (Grok: `Approve`, ...); the driver taps `^(Approve|Allow once)$`.
+  iOS shares the script and only passes the env through the job (`MOCK_PROVIDER`); iOS live CI verification is a separate track.
+* Verified: desktop Codex run 39997253161 (6/6; GPT-6-Astra picker, OpenAI icon in sidebar row, Settings > Providers "Codex ... Authenticated - OpenAI API Key", Grok shown Disabled).
+  Note: S03 table content is scripted text and still lists "grok (mock)" as a table row; that is scenario content, not provider branding.
+
 ## Known limits
 
 * ACP (grok) and Codex (`app-server`) flavors are implemented. pi / claude / opencode adapters are not built (see "Codex adapter" for Codex limits).
