@@ -294,5 +294,8 @@ Protocol recon: `@anthropic-ai/claude-agent-sdk` 0.3.276 (`sdk.mjs` / `sdk.d.ts`
 - S24: the commit message source (text-gen stub) is inferred, not shown in the logs. S28: only a running tool row, no distinct background-task UI. S37: tree-row clicks do not register in Playwright (drivers fall back to Ctrl+P); markdown shows as source. S20: reply shows the leaked handoff prompt, not natural chat.
 - S07: T3 does not render in-progress stdout, so no mid-stream output still exists (an in-progress status still + the completed output are captured).
 - S40 clip is a 30 s tail starting at the held state; early growth is in the timed PNGs. The `s40-held` UI dump can have 0 nodes (vacuous guard); server truth is the real check.
+- Claude pack: S03 "streaming" and "done" shots look alike (T3 shows Claude text per finished block); S20 after-switch reply shows the leaked handoff prompt (same as Codex); S18's detail pane is the Claude card
+  only because the driver clicks `Select Claude`; the account email is blurred by T3. Plan-mode UI (S11b) exists only with the client setting `planModeEnabled` (the driver sets it). Claude-pack drivers
+  s22/s23 are Claude-only and pass vacuously (FINDING line) when run for another provider.
 - Runner hostname still visible in the project panel in web/desktop shots (mask in scenarios when it matters).
 - iOS live path (`mobile-live.sh ios`) is written but untested: the upstream showcase pairing flake blocked both attempts.

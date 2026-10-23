@@ -487,7 +487,7 @@ export function serveClaude({ input = process.stdin, output = process.stdout, en
       }
     }
     rt.closeOpen();
-    rt.endMsg(failure ? "end_turn" : "end_turn");
+    rt.endMsg("end_turn");
     session.history.push(ctx.text);
     session.abort = null;
     const outTok = Math.max(1, Math.ceil(rt.outChars() / 4));
