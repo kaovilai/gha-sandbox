@@ -103,11 +103,14 @@ jobs:
         working-directory: target
         run: bash "$GITHUB_WORKSPACE/targets/$PROFILE/setup.sh"
 
-      - name: Install harness (Playwright, ffmpeg, imagemagick)
+      - name: Install harness (Playwright + Chromium)
         run: |
           npm ci
-          npx playwright install --with-deps chromium
-          bash scripts/apt-install.sh ffmpeg imagemagick
+          # No --with-deps: it runs a bare apt-get that stalls on runners; the image already
+          # ships Chrome's shared libraries. Fall back to installing deps only if launch fails.
+          npx playwright install chromium
+          node -e "import('playwright').then(async ({chromium})=>{const b=await chromium.launch();await b.close();console.log('chromium ok')})" \
+            || timeout 900 npx playwright install-deps chromium
 
       - name: Start target app (profile start.sh)
         working-directory: target
@@ -170,7 +173,8 @@ jobs:
             cp "$f" "pub/after-$n"
             if [ -f "out/out-before/$n" ]; then
               cp "out/out-before/$n" "pub/before-$n"
-              convert "out/out-before/$n" "$f" +append "pub/side-by-side-$n"
+              ffmpeg -nostdin -loglevel error -y -i "out/out-before/$n" -i "$f" \
+                -filter_complex hstack=inputs=2 "pub/side-by-side-$n"
             fi
           done
           for f in out/out-*/*.webm; do
