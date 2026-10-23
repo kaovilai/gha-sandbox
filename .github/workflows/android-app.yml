@@ -88,6 +88,57 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Metro cache dirs
+        id: metro
+        run: |
+          echo "tmp=$(node -p 'require("os").tmpdir()')" >> "$GITHUB_OUTPUT"
+          echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Metro/Expo transform cache
+        id: metro-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ steps.metro.outputs.tmp }}/metro-cache
+            target/node_modules/.cache
+            target/apps/mobile/.expo
+          key: metro-${{ runner.os }}-${{ hashFiles('target/pnpm-lock.yaml') }}-${{ steps.metro.outputs.week }}
+          restore-keys: |
+            metro-${{ runner.os }}-${{ hashFiles('target/pnpm-lock.yaml') }}-
+            metro-${{ runner.os }}-
+
+      - name: Restore debug APK cache (native build is the slow part)
+        id: apk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: target/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          key: android-apk-{{ hashFiles('target/pnpm-lock.yaml','target/apps/mobile/app.config.ts','target/apps/mobile/package.json','target/apps/mobile/plugins/**','target/apps/mobile/modules/**','target/patches/**') }}
+
+      - name: AVD cache (snapshot boots in seconds instead of minutes)
+        id: avd-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-api36-x86_64-pixel7pro-4c-3g-v1
+
+      - name: Create AVD + snapshot (cache miss only)
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          avd-name: Pixel_10_Pro
+          cores: 4
+          ram-size: 3072M
+          disable-animations: false
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: echo "Generated AVD snapshot for caching."
+
       - name: Build + capture on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -99,7 +150,30 @@ jobs:
           cores: 4
           ram-size: 3072M
           disable-animations: false
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot-save -noaudio -no-boot-anim
           script: bash scripts/android-app.sh
+
+      - name: Save debug APK cache
+        if: always() && steps.apk-cache.outputs.cache-hit != 'true' && hashFiles('target/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: target/apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          key: android-apk-{{ hashFiles('target/pnpm-lock.yaml','target/apps/mobile/app.config.ts','target/apps/mobile/package.json','target/apps/mobile/plugins/**','target/apps/mobile/modules/**','target/patches/**') }}
+
+      - name: Report cache dir sizes (verifies Metro cache path guesses)
+        if: always()
+        run: du -sh "${{ steps.metro.outputs.tmp }}"/metro-* target/node_modules/.cache target/apps/mobile/.expo 2>/dev/null || true
+
+      - name: Save Metro/Expo transform cache (once per lockfile per week)
+        if: always() && steps.metro-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.metro.outputs.tmp }}/metro-cache
+            target/node_modules/.cache
+            target/apps/mobile/.expo
+          key: metro-${{ runner.os }}-${{ hashFiles('target/pnpm-lock.yaml') }}-${{ steps.metro.outputs.week }}
 
       - uses: actions/upload-artifact@v4
         if: always()

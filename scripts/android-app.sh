@@ -8,6 +8,11 @@ root=$(pwd)
 args=(--platform android --device pixel --scene threads --scene thread --appearance dark)
 
 cd target
+# Reuse the cached debug APK when present (native build is the slow part).
+if [ -f apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk ]; then
+  echo "reusing cached app-debug.apk (--skip-build)"
+  args+=(--skip-build)
+fi
 # Free runners are slower than upstream's: first Metro bundle can exceed the hard-coded
 # 90-120 s scene waits. Patch our throwaway checkout only.
 perl -pi -e 's/waitForScene\(120_000\)/waitForScene(900_000)/; s/timeoutMs = 90_000,/timeoutMs = 900_000,/' scripts/mobile-showcase.ts

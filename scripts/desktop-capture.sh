@@ -19,7 +19,11 @@ if [ "${DESKTOP_MODE:-built}" = dev ]; then
   # Dev mode always opens a detached DevTools window (DesktopWindow.ts isDevelopment).
   nohup vp run dev:desktop --home-dir "${RUNNER_TEMP:-/tmp}/t3home" > "$out/desktop.log" 2>&1 &
 else
-  vp run build:desktop > "$out/build.log" 2>&1 || { tail -60 "$out/build.log"; exit 1; }
+  if [ "${BUILD_CACHE_HIT:-}" = true ] && [ -f apps/desktop/dist-electron/boot.cjs ]; then
+    echo "exact-sha build outputs restored from cache; skipping build" | tee "$out/build.log"
+  else
+    vp run build:desktop > "$out/build.log" 2>&1 || { tail -60 "$out/build.log"; exit 1; }
+  fi
   T3CODE_HOME="${RUNNER_TEMP:-/tmp}/t3home" nohup vp run start:desktop > "$out/desktop.log" 2>&1 &
 fi
 dev=$!

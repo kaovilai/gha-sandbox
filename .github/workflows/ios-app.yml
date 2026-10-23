@@ -66,22 +66,55 @@ jobs:
           brew install cameroncooke/axe/axe
           axe --version
 
-      - name: Restore Xcode DerivedData cache (native build is the slow part)
+      - name: Metro cache dirs
+        id: metro
+        run: |
+          echo "tmp=$(node -p 'require("os").tmpdir()')" >> "$GITHUB_OUTPUT"
+          echo "week=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Metro/Expo transform cache
+        id: metro-cache
         uses: actions/cache/restore@v4
         with:
-          path: target/apps/mobile/.showcase/ios-derived-data
-          key: ios-dd-${{ runner.os }}-${{ hashFiles('target/pnpm-lock.yaml') }}-${{ github.run_id }}
-          restore-keys: ios-dd-${{ runner.os }}-
+          path: |
+            ${{ steps.metro.outputs.tmp }}/metro-cache
+            target/node_modules/.cache
+            target/apps/mobile/.expo
+          key: metro-${{ runner.os }}-${{ hashFiles('target/pnpm-lock.yaml') }}-${{ steps.metro.outputs.week }}
+          restore-keys: |
+            metro-${{ runner.os }}-${{ hashFiles('target/pnpm-lock.yaml') }}-
+            metro-${{ runner.os }}-
+
+      - name: Restore built T3Code.app (native build is the slow part)
+        id: app-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: target/apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/T3Code.app
+          key: ios-app-{{ runner.os }}-{{ hashFiles('target/pnpm-lock.yaml','target/apps/mobile/app.config.ts','target/apps/mobile/package.json','target/apps/mobile/plugins/**','target/apps/mobile/modules/**','target/patches/**') }}
 
       - name: Build + capture on simulator
         run: bash scripts/ios-app.sh
 
-      - name: Save Xcode DerivedData cache (even if capture failed)
-        if: always()
+      - name: Save built T3Code.app (once per native hash, even if capture failed)
+        if: always() && steps.app-cache.outputs.cache-hit != 'true' && hashFiles('target/apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/T3Code.app/Info.plist') != ''
         uses: actions/cache/save@v4
         with:
-          path: target/apps/mobile/.showcase/ios-derived-data
-          key: ios-dd-${{ runner.os }}-${{ hashFiles('target/pnpm-lock.yaml') }}-${{ github.run_id }}
+          path: target/apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/T3Code.app
+          key: ios-app-{{ runner.os }}-{{ hashFiles('target/pnpm-lock.yaml','target/apps/mobile/app.config.ts','target/apps/mobile/package.json','target/apps/mobile/plugins/**','target/apps/mobile/modules/**','target/patches/**') }}
+
+      - name: Report cache dir sizes (verifies Metro cache path guesses)
+        if: always()
+        run: du -sh "${{ steps.metro.outputs.tmp }}"/metro-* target/node_modules/.cache target/apps/mobile/.expo 2>/dev/null || true
+
+      - name: Save Metro/Expo transform cache (once per lockfile per week)
+        if: always() && steps.metro-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.metro.outputs.tmp }}/metro-cache
+            target/node_modules/.cache
+            target/apps/mobile/.expo
+          key: metro-${{ runner.os }}-${{ hashFiles('target/pnpm-lock.yaml') }}-${{ steps.metro.outputs.week }}
 
       - uses: actions/upload-artifact@v4
         if: always()

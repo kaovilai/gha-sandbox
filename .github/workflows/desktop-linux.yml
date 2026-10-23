@@ -40,6 +40,24 @@ jobs:
           cache: true
           run-install: true
 
+      - name: Resolve target sha
+        id: sha
+        run: echo "sha=$(git -C target rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore vp task cache + build outputs
+        id: vp-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            target/.vite-plus
+            target/apps/*/.vite-plus
+            target/packages/*/.vite-plus
+            target/apps/desktop/dist-electron
+            target/apps/server/dist
+            target/apps/web/dist
+          key: vp-${{ runner.os }}-${{ steps.sha.outputs.sha }}
+          restore-keys: vp-${{ runner.os }}-
+
       - uses: actions/cache@v4
         with:
           path: ~/.cache/electron
@@ -54,7 +72,22 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Capture
+        env:
+          BUILD_CACHE_HIT: ${{ steps.vp-cache.outputs.cache-hit }}
         run: bash scripts/desktop-capture.sh
+
+      - name: Save vp task cache + build outputs (per target sha)
+        if: always() && steps.vp-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            target/.vite-plus
+            target/apps/*/.vite-plus
+            target/packages/*/.vite-plus
+            target/apps/desktop/dist-electron
+            target/apps/server/dist
+            target/apps/web/dist
+          key: vp-${{ runner.os }}-${{ steps.sha.outputs.sha }}
 
       - uses: actions/upload-artifact@v4
         if: always()
