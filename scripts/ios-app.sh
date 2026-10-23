@@ -15,7 +15,11 @@ if [ -d apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimula
 fi
 # Free runners are slower than upstream's: first Metro bundle can exceed the hard-coded
 # 90-120 s scene waits. Patch our throwaway checkout only.
-perl -pi -e 's/waitForScene\(120_000\)/waitForScene(360_000)/; s/timeoutMs = 90_000,/timeoutMs = 360_000,/' scripts/mobile-showcase.ts
+# Pairing tokens expire after 5 min, so retry the first scene quickly and often (4 x 150 s)
+# instead of upstream's 2 x 120 s; later scenes keep a generous 360 s.
+perl -pi -e 's/waitForScene\(120_000\)/waitForScene(150_000)/; s/timeoutMs = 90_000,/timeoutMs = 360_000,/; s/attempt < 2;/attempt < 4;/; s/const isLastAttempt = attempt === 1;/const isLastAttempt = attempt === 3;/' scripts/mobile-showcase.ts
+grep -q 'attempt < 4;' scripts/mobile-showcase.ts || echo "WARN: retry patch did not apply"
+
 # iOS simulators share the host loopback; the runner's LAN IPv4 (upstream's default Metro host
 # for iOS) is unreachable from the simulator, leaving the dev launcher on "Searching...".
 perl -pi -e 's/const metroHost = hasIos \? lanIpv4Address\(\) : "127\.0\.0\.1";/const metroHost = "127.0.0.1";/' scripts/mobile-showcase.ts
