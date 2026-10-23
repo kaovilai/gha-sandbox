@@ -35,6 +35,8 @@ export default async function ({ page, shot, env }) {
     }
     await page.waitForTimeout(400);
   }
+  // T3 ran the wake turn: the reply that reports the finished task is in the thread
+  await expectText(page, /Watch the dev server finished \(exit 0\)\. Last line: dev server listening/, "wake-turn reply reporting the finished task", 40_000);
   await page.waitForTimeout(1500);
   console.log(`FINDING banner cleared ${Date.now() - t0}ms after the completion report; page mentions finished task: ${/finished|completed|exit 0/i.test(await bodyText(page))}`);
   await shot("banner-cleared");

@@ -397,5 +397,13 @@ test("background-task (default): persistent Monitor frames, turn ends, then _x.a
   assert.equal(done.params.update.task_snapshot.exit_code, 0);
   assert.match(done.params.update.task_snapshot.output, /dev server listening/);
   assert.match(text(c.frames), /running in the background/);
+  // wake turn (task-completed-<id> prompt id): TaskOutput tool result for the task, a reply, and its own turn_completed
+  const wakeTool = await c.waitFor((f) => f.params?.update?.rawOutput?.type === "TaskOutput");
+  assert.equal(wakeTool.params._meta.promptId, `task-completed-${bg.params.update.task_id}`);
+  assert.equal(wakeTool.params.update.rawOutput.Result.task_id, bg.params.update.task_id);
+  assert.equal(wakeTool.params.update.status, "completed");
+  const wakeDone = await c.waitFor((f) => f.params?.update?.sessionUpdate === "turn_completed");
+  assert.equal(wakeDone.params.update.prompt_id, `task-completed-${bg.params.update.task_id}`);
+  assert.match(text(c.frames), /Watch the dev server finished \(exit 0\)\. Last line: dev server listening/);
   c.close();
 });
