@@ -254,17 +254,28 @@ run_s40() {
   server_truth s40-held "$tid"
   local held_status=$SRV_STATUS
   log "early server text had: $(echo "$early_text" | grep -c '^Step') step line(s)"
-  # uiautomator often returns 0 nodes while the app animates ("Thinking"); the held screenshot + server text (Step 5, status running)
-  # are the proof then, so a missing UI tree only warns when the server already has Step 5.
-  wait_ui "Step 5 of 8" 30 s40-held-ui >/dev/null || { echo "$SRV_TEXT" | grep -q "Step 5 of 8" && [ "$held_status" = running ] && log "WARN: UI tree has no 'Step 5 of 8' (uiautomator idle flake); relying on screenshot + server truth" || { rec_stop s40; return 1; }; }
+  # A missing UI tree is NOT proof of anything: in CI run 40016905754/40019463438 (mock_provider=both) the held AND complete screenshots were
+  # blank (no assistant text) while server truth was fine, i.e. the app view was stale. So when the tree lacks the text, remount the thread
+  # (scene toggle, reopen) and require the text there; only then is the state proven in the UI. Never "ok" on server truth alone.
+  if ! wait_ui "Step 5 of 8" 30 s40-held-ui >/dev/null; then
+    log "UI lacks 'Step 5 of 8' while held (stale/blank thread view or uiautomator flake); remounting thread"
+    open_thread "$title" && wait_ui "Step 5 of 8" 45 s40-held-ui2 >/dev/null || { shot s40-held-NO-UI-PROOF; rec_stop s40; return 1; }
+    sleep 1
+    shot s40-streaming-held-remounted
+  fi
   # mid-turn means: UI has step 5 but not step 6, and the server still has the run open
-  node "$uia" find "Step 6 of 8" < "$out/ui/s40-held.dump" >/dev/null && log "UNEXPECTED: step 6 visible while held"
+  node "$uia" find "Step 6 of 8" < "$out/ui/last.dump" >/dev/null && log "UNEXPECTED: step 6 visible while held"
   node "$kit/ctl/mockctl.mjs" release live40
   wait_server "$tid" "Live stream complete" 90 || { rec_stop s40; return 1; }
   sleep 4
   shot s40-complete
   ui_state s40-complete
-  wait_ui "Live stream complete" 30 s40-done >/dev/null || log "WARN: UI tree has no 'Live stream complete' (uiautomator flake); server truth below + shot s40-complete"
+  if ! wait_ui "Live stream complete" 30 s40-done >/dev/null; then
+    log "UI lacks 'Live stream complete' (stale/blank thread view or uiautomator flake); remounting thread"
+    open_thread "$title" && wait_ui "Live stream complete" 45 s40-done2 >/dev/null || { shot s40-complete-NO-UI-PROOF; rec_stop s40; return 1; }
+    sleep 1
+    shot s40-complete-remounted
+  fi
   server_truth s40-complete "$tid"
   rec_stop s40
   log "s40 server status held=$held_status final=$SRV_STATUS"

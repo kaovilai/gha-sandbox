@@ -242,8 +242,10 @@ Frame shapes come from the upstream recorded transcripts (`orchestration-v2/test
 * Verified: desktop Codex run 39997253161 (6/6; GPT-6-Astra picker, OpenAI icon in sidebar row, Settings > Providers "Codex ... Authenticated - OpenAI API Key", Grok shown Disabled).
   Android live Codex run 40003071583 (S40/S41/S42, all `codex-s4x=ok`): thread rows and composer show the OpenAI glyph (the mobile composer shows the provider icon, not the model name; the
   GPT-6-Astra name is only visible on desktop/web), server truth `provider=codex model=gpt-6-astra`, approval card `Allow once / Allow session / Decline`, "Approved: NOTES.md was written", answered question.
-  Mobile flakes handled in `mobile-live.sh`: uiautomator returns 0 nodes while the app animates (held stream, "Working" list row) -> S40 relies on screenshot + server truth when the tree is empty,
-  `open_thread` retries via scene toggle; BACK from the list leaves the app, so it is never the fallback.
+  Mobile flakes handled in `mobile-live.sh`: uiautomator returns 0 nodes while the app animates (held stream, "Working" list row), and the thread view can stay blank/stale while the server
+  has the text (seen in `both` mode, run 40019463438: held + complete screenshots blank). S40 therefore never passes on server truth alone: if the UI tree lacks "Step 5 of 8" / "Live stream complete"
+  it remounts the thread (scene toggle + reopen) and requires the text there (`s40-streaming-held-remounted.png`, `s40-complete-remounted.png`). `open_thread` retries via scene toggle; BACK from the list
+  leaves the app, so it is never the fallback. In `both` mode gate/hold release files are cleared before each gated scenario (the Grok pass otherwise pre-releases the Codex pass's gates).
   Note: S03 table content is scripted text and still lists "grok (mock)" as a table row; that is scenario content, not provider branding.
 
 ## Known limits
