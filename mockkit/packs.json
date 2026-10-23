@@ -12,7 +12,20 @@
     "s15-interrupt-cancel",
     "s17-multi-turn-context"
   ],
-  "smoke": ["s03-markdown-stream", "s17-multi-turn-context"],
+  "wide": [
+    "s01-first-run-wizard",
+    "s09-approval-deny",
+    "s12-todo-entries",
+    "s16-queue-steer",
+    "s18-provider-status-matrix",
+    "s20-model-picker-switch",
+    "s24-git-commit-push",
+    "s31-sidebar-thread-actions",
+    "s33-command-palette-tour",
+    "s34-settings-tour",
+    "s37-files-browser"
+  ],
+  "smoke":["s03-markdown-stream", "s17-multi-turn-context"],
   "explore": ["s00-explore"],
   "all": "*"
 }
