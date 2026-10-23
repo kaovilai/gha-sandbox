@@ -8,6 +8,11 @@ root=$(pwd)
 args=(--platform ios --device iphone-6.9 --scene threads --scene thread --appearance dark)
 
 cd target
+# Reuse the DerivedData-cached app when present: the native compile is the slow (60+ min) part.
+if [ -d apps/mobile/.showcase/ios-derived-data/Build/Products/Debug-iphonesimulator/T3Code.app ]; then
+  echo "reusing cached T3Code.app (--skip-build)"
+  args+=(--skip-build)
+fi
 # Free runners are slower than upstream's: first Metro bundle can exceed the hard-coded
 # 90-120 s scene waits. Patch our throwaway checkout only.
 perl -pi -e 's/waitForScene\(120_000\)/waitForScene(360_000)/; s/timeoutMs = 90_000,/timeoutMs = 360_000,/' scripts/mobile-showcase.ts

@@ -62,6 +62,10 @@ async function warmLoop() {
 }
 
 const server = http.createServer(async (req, res) => {
+  const t0 = Date.now();
+  res.on("finish", () =>
+    console.log(`${req.method} ${(req.url ?? "").slice(0, 110)} -> ${res.statusCode} ${Date.now() - t0}ms`),
+  );
   const pathname = new URL(req.url ?? "/", "http://x").pathname;
   if (req.method === "GET" && pathname === "/") {
     const deadline = Date.now() + 120_000;
@@ -90,6 +94,7 @@ const server = http.createServer(async (req, res) => {
 
 // HMR / debugger websockets: tunnel raw bytes.
 server.on("upgrade", (req, socket, head) => {
+  console.log(`UPGRADE ${req.url}`);
   const up = net.connect(UPSTREAM.port, UPSTREAM.host, () => {
     const headerLines = Object.entries(req.headers).map(([k, v]) => `${k}: ${v}`);
     up.write(`${req.method} ${req.url} HTTP/1.1\r\n${headerLines.join("\r\n")}\r\n\r\n`);
