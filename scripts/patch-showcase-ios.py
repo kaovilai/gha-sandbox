@@ -28,7 +28,9 @@ replacement = (
     "      `t3code://expo-development-client/?url=${encodeURIComponent(metroUrl)}`,\n"
     "    ]).catch(() => undefined);\n"
     "    await delay(3000);\n"
-    '    await runCommand("axe", ["tap", "--label", "Open", "--udid", simulator.udid]).catch(\n'
+    '    // System "Open in T3 Code?" alert is invisible to AXe label lookup; tap its Open button by\n'
+    "    // point (iPhone 17 Pro Max, 440x956 pt). Harmless blank-area tap if no alert is shown.\n"
+    '    await runCommand("axe", ["tap", "-x", "293", "-y", "515", "--udid", simulator.udid]).catch(\n'
     "      () => undefined,\n"
     "    );\n"
     "  };"
