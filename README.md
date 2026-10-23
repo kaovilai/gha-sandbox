@@ -14,10 +14,10 @@ orphan `evidence` branch (raw URLs serve `image/*`, so PNG/GIF embed inline in P
 | Web | `sandbox.yml` | Working: before/after matrix, Playwright screenshots + video, side-by-side, evidence branch |
 | Desktop (Linux Electron) | `desktop-linux.yml` | Working: real built app under Xvfb, onboarding clicked through, screenshot + 12 s recording, published |
 | Android app | `android-app.yml` | Working: KVM emulator, native build, seeded screenshots (upstream showcase) + recording, published |
-| iOS app | `ios-app.yml` | Partial: simulator + native build + JS load work, one full success; pairing step is flaky (see below) |
+| iOS app | `ios-app.yml` | Working: simulator + native build + seeded screenshots; `-f live=true` also drives mock threads S40-S42 (fresh pairing per attempt); default-path pairing can still flake |
 | Emulator capability probes | `emulators.yml` | Working: Android + iOS boot, screenshot, recording |
 | Re-publish any run's artifacts | `publish-run.yml` | Working |
-| Mock kit (keyless AI) | `mockkit/` | Working: Grok-flavored web 11+14, **Codex-flavored web pack 17** (`scenarios=codex`), desktop 6, Android live 3; iOS live untested; Codex on desktop/mobile not run. See `mockkit/README.md` |
+| Mock kit (keyless AI) | `mockkit/` | Working: Grok-flavored web 11+14, **Codex-flavored web pack 17** (`scenarios=codex`), desktop 6, Android live 3, iOS live 3 (S40-S42, run 40014862069); Codex on desktop/mobile not run. See `mockkit/README.md` |
 
 ## Using it for other projects (profiles)
 
@@ -90,7 +90,7 @@ Prune with `gh cache list` / `gh cache delete`.
   3. iOS uses loopback (not the runner LAN IP) for Metro.
   4. `--keep-running` + `| tee` deadlocks (Metro holds the pipe); redirect to a file.
   5. Upstream's hard-coded 90-120 s scene waits are patched in the throwaway checkout.
-  - **Open:** after the app loads, seeded-server pairing intermittently never happens ("No environments connected"), so scene `thread` never renders. One full success (real seeded screenshots), then 5+ failures with identical config; 4x150 s retries inside the 5 min pairing-token TTL did not help. Next step is server-side/app-side logging of the pairing call.
+  - **Pairing flake (fixed for `-f live=true`, see `mockkit/README.md` "iOS live pairing"):** upstream mints 5 min one-time credentials before launch and the app retries those same dead URLs; the live path mints a fresh one per attempt instead. The default (non-live) path still uses upstream pairing and can flake.
 - Artifact egress: repeated downloads of large recordings hit "Egress is over the account limit" (HTTP 503); read job logs instead, keep recordings short, and prune the `evidence` branch.
 
 ## Rules

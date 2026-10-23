@@ -184,6 +184,31 @@ card is absent after the first wait;
 (c) approval buttons are `Cancel`, `Decline`, `Allow all edits this session`, `Approve` (not "Allow once"); (d) assistant markdown text
 nodes are sometimes absent from the accessibility tree, so final-state checks also read the server.
 
+## iOS live pairing (ios-app.yml -f live=true)
+
+Root cause of the old "No environments connected" flake (from run logs + `[gha-*]` app logs, runs 39997598746 / 40010475557 / 40014862069):
+
+* Upstream mints one pairing credential per environment BEFORE launching the app and passes them as launch args. Credentials are one-time with a 5 min TTL.
+* The app retries `connectPairingUrl` with the SAME URL (`retryShowcaseOperation`: 10 s attempt timeout, the result of a timed-out attempt is dropped). On a 3 vCPU runner (Metro bundling) an attempt takes longer than 10 s and may already have redeemed the credential;
+  every later attempt, and every `launchShowcaseApp(true)` relaunch, replays a spent/expired URL ("The environment credential ..." error in `[gha-pair] FAILED`).
+* `auth pairing create` itself takes 20-100 s while Metro saturates the CPU, so minting on demand is slow too.
+
+Fix (JS/TS only in the throwaway checkout, no native rebuild; default path untouched):
+
+1. `scripts/patch-showcase-ios-pairing.py`: the showcase writes `{baseDir,port,label}` of the kept environments to `$PAIRING_ENVS_FILE`; the coordinator asks
+   `http://127.0.0.1:8201/pairing?port=<port>` for a NEW URL on every attempt (attempt timeout 120 s) and logs `[gha-pair]`, `[gha-fixture]`, `[gha-session]` with `console.warn` (visible in `pass1.log`).
+2. `scripts/ios-pairing-server.mjs`: pooled minter (`auth pairing create --ttl 2h`); one credential per environment is pre-minted as soon as the envs file exists, one mint in flight per env, a spare is re-minted after each serve.
+3. `scripts/ios-app.sh` streams `[gha-*]`/pairing lines + AXe screen labels into the step log (artifacts cannot be downloaded), prints a filtered `pass1.log` tail + simulator `log show` on failure, and the publish job pushes every 3rd `diag/` screenshot as `diag__tNNN.png` to the evidence branch when the run did not succeed.
+
+Other iOS findings:
+
+* The thread screen disables Approve/Submit/Stop ("This connection cannot respond to approvals / submit answers / control this task") until the environment's session scopes are fetched over HTTP.
+  On the loaded runner that fetch can time out (`RemoteEnvironmentAuthTimeoutError`) and the failure sticks until the thread is remounted. `mobile-live.sh` `ensure_operable` waits 35 s (SWR stale time) and remounts until the hint is gone (run 39997598746 failed S41/S42 exactly this way).
+* mockkit holds time out after 120 s by default; slow CLI polling exceeded that and the stream ran past the "held" state. `mobile-live.sh` exports `MOCK_HOLD_TIMEOUT_MS=900000` (the seed passes it into the provider env).
+* iOS back = AXe `gesture swipe-from-left-edge`; rows/buttons are tapped by accessibility label like Android (`scripts/uia.mjs` parses AXe `describe-ui` JSON).
+* iOS shows the resolution text, unlike Android: S41 resolved = "Approved: NOTES.md was written." + "+3 -0"; S42 answered = "Thanks, going with: [\"Strict (Recommended)\"]".
+* `publish-evidence.sh` tolerates ffmpeg failures: `simctl recordVideo` clips are variable-frame-rate, so the last 15 s of a static screen can have no frames (the GIF then falls back to the first 15 s).
+
 ## Codex adapter
 
 A second protocol flavor on the same scenario IR: T3's `codex` driver shows the Codex-branded provider (OpenAI icon, "GPT-6-Astra" model picker,
@@ -246,4 +271,4 @@ Frame shapes come from the upstream recorded transcripts (`orchestration-v2/test
 - S07: T3 does not render in-progress stdout, so no mid-stream output still exists (an in-progress status still + the completed output are captured).
 - S40 clip is a 30 s tail starting at the held state; early growth is in the timed PNGs. The `s40-held` UI dump can have 0 nodes (vacuous guard); server truth is the real check.
 - Runner hostname still visible in the project panel in web/desktop shots (mask in scenarios when it matters).
-- iOS live path (`mobile-live.sh ios`) is written but untested: the upstream showcase pairing flake blocked both attempts.
+- iOS live (`ios-app.yml -f live=true`): verified green in CI (S40/S41/S42, see "iOS live pairing"). Runner CPU contention makes every step slow (CLI `thread show` ~10 s, session fetch can time out), so state is proven by PNGs + server truth; timings in the shots ("Working 1m 02s") are not meaningful.
