@@ -5,7 +5,7 @@ import { dumpPage, sendPrompt, setRuntimeMode, startSession } from "../lib/ui.mj
 
 export default async function ({ page, shot, env }) {
   await startSession(page, env);
-  await setRuntimeMode(page, /supervised|approval|ask/i, { shot });
+  await setRuntimeMode(page, /^Supervised/, { shot });
   await shot("mode-set");
   await sendPrompt(page, "[mock:approval-allow] please write a notes file");
   const approve = page.getByRole("button", { name: /^Approve$/ }).first();

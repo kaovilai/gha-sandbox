@@ -15,8 +15,7 @@ export default async function ({ page, shot, env }) {
   await dumpPage(page, "s10 pending");
   await page.getByText(/Strict \(Recommended\)/).first().click();
   await page.waitForTimeout(600);
-  await shot("selected");
-  await page.getByRole("button", { name: "Submit", exact: true }).click();
+  await shot("selected-immediately-submits");
   await page.getByText(/going with/).first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1000);
   await shot("answered");
