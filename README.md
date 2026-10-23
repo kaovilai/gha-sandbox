@@ -52,6 +52,24 @@ gh workflow run ios-app.yml       -f ref=pull/1234/head [-f keep_running=true]
 gh workflow run publish-run.yml -f run_id=<id> -f artifact=out-android-app -f label=android-app
 ```
 
+## Caching (so reruns don't start from scratch)
+
+Each cache is **save-on-miss only** (exact keys, no per-run suffix) so the repo's 10 GB cache
+budget isn't churned; stale native binaries can't leak in because mobile keys hash the native
+inputs (`pnpm-lock.yaml`, `apps/mobile/{app.config.ts,package.json,plugins,modules}`, `patches`).
+
+| Workflow | Cached | Key |
+|---|---|---|
+| all (`setup-vp`) | pnpm store + vp toolchain | lockfile |
+| web | Playwright browsers + `~/.npm` | harness `package-lock.json` |
+| desktop | `.vite-plus` task cache + `dist` outputs; Electron download | target sha (falls back to latest); Electron: lockfile. Exact-sha hit skips the build (capture 9 min -> 2.5 min) |
+| Android | debug `app-debug.apk` (reused via `--skip-build`); AVD snapshot (fast boot); Gradle (`setup-gradle`); Metro transform cache | native hash; AVD config; lockfile + ISO week |
+| iOS | built `T3Code.app` (reused via `--skip-build`); Metro transform cache | native hash; lockfile + ISO week |
+
+Metro cache paths are best guesses (`$TMPDIR/metro-cache`, `node_modules/.cache`, `.expo`); the
+`Report cache dir sizes` step prints what actually exists so the paths can be corrected.
+Prune with `gh cache list` / `gh cache delete`.
+
 ## Hard-won runner findings (free tier: ubuntu 4 vCPU/16 GB, macOS 3 vCPU/7 GB)
 
 - `vp`: use `voidzero-dev/setup-vp@<exact tag>`; the floating `v1` tag is frozen. Install pnpm via npm at the target's pinned version.
