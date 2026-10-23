@@ -717,7 +717,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         // MOCK_CODEX_ACCOUNT=chatgpt adds what a subscription account reports: account id, reset credits, a 5h + weekly window.
         const chat = env.MOCK_CODEX_ACCOUNT === "chatgpt";
         const plan = env.MOCK_CODEX_PLAN || "plus";
-        const snap = { limitId: "codex", limitName: null, planType: plan, primary: { usedPercent: 23, windowDurationMins: 300, resetsAt: nowSec() + 2 * 3600 }, secondary: { usedPercent: 41, windowDurationMins: 10080, resetsAt: nowSec() + 5 * 86400 } };
+        const snap = { limitId: "codex", limitName: null, planType: plan, primary: { usedPercent: resetCredits.used ? 0 : 23, windowDurationMins: 300, resetsAt: nowSec() + 2 * 3600 }, secondary: { usedPercent: resetCredits.used ? 0 : 41, windowDurationMins: 10080, resetsAt: nowSec() + 5 * 86400 } };
         return reply(id, {
           rateLimits: snap,
           rateLimitsByLimitId: null,
@@ -734,6 +734,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
       case "account/rateLimitResetCredit/consume": {
         if (resetCredits.available <= 0) return reply(id, { outcome: "noCredit" });
         resetCredits.available -= 1;
+        resetCredits.used = true; // the next account/rateLimits/read reports cleared windows
         return reply(id, { outcome: "reset" });
       }
       case "skills/list":

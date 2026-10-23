@@ -346,6 +346,7 @@ test("chatgpt account: plan, models_cache.json, account id + reset credits in ra
   assert.deepEqual((await c.request("account/rateLimitResetCredit/consume", { idempotencyKey: "k" })).result, { outcome: "reset" });
   assert.deepEqual((await c.request("account/rateLimitResetCredit/consume", { idempotencyKey: "k2" })).result, { outcome: "noCredit" });
   assert.equal((await c.request("account/rateLimits/read", null)).result.rateLimitResetCredits.availableCount, 0);
+  assert.equal((await c.request("account/rateLimits/read", null)).result.rateLimits.primary.usedPercent, 0, "windows cleared after the reset");
   c.close();
   // api-key account keeps the lean shape
   const k = client();
