@@ -25,7 +25,10 @@ and makes the mock the default model). `MOCK_KEEP_OTHER_PROVIDERS=1` keeps them.
 | `lib/ir.mjs` | scenario IR (`S.say/think/tool/read/fsWrite/sh/permission/ask/plan/error/hold/sleep`) + `runSteps()` |
 | `lib/pace.mjs` | deterministic pacing (`MOCK_PACE=fast\|real\|slow`, seeded PRNG `MOCK_SEED`) |
 | `lib/select.mjs` | `[mock:<id> k=v]` tag parser (after the last `<user_request>`), text-gen detection |
-| `lib/hold.mjs`, `ctl/mockctl.mjs` | `{hold:name}` gates released from outside (`release`, `wait-reached`) |
+| `lib/hold.mjs`, `ctl/mockctl.mjs` | `{hold:name}` gates released from outside (`release`, `wait-reached`); `next <id>` = hidden routing |
+| `lib/queue.mjs` | per-cwd FIFO "next scenario" queue read by the agent |
+| `lib/boot.mjs` | boot/stop one isolated T3 dev instance (CI) |
+| `packs.json` | scenario packs for `SCENARIOS` (`web`, `smoke`, `explore`, `all`) |
 | `lib/log.mjs` | NDJSON log of every frame in/out and every step to `$MOCK_LOG` |
 | `adapters/acp.mjs` | ACP agent: initialize, authenticate, session/new\|load\|resume\|close, set_model, set_config_option, prompt, cancel, request_permission, `_x.ai/ask_user_question` |
 | `bin/t3-mock-acp.mjs`, `bin/mock-cli.sh` | entrypoint; fake grok launcher (`--version`, `models`, `inspect --json`, `agent stdio`) |
@@ -34,18 +37,30 @@ and makes the mock the default model). `MOCK_KEEP_OTHER_PROVIDERS=1` keeps them.
 | `scenarios-ui/<id>.mjs` | Playwright drivers (`export default async ({page, shot, env}) => ...`) |
 | `test/acp.test.mjs` | `node --test mockkit/test`, no T3 needed (~10 s; CI: `mockkit-test.yml`) |
 
-CI: `targets/t3code-mock/` (profile.env/setup.sh copied from `targets/t3code`; `start.sh` boots the app, discovers
-the state dir, seeds settings; `scenario.mjs` runs the drivers listed in `$SCENARIOS`; `set-all.mjs` is a preset
-because the workflow only takes a scenario *path*).
+CI: `targets/t3code-mock/` (profile.env/setup.sh copied from `targets/t3code`). `start.sh` only validates the toolchain;
+`scenario.mjs` boots **one isolated T3 instance per scenario** (`lib/boot.mjs`: fresh `--home-dir` = fresh DB/settings,
+fresh workspace repo `<tmp>/mockkit-run/<id>/ws/demo-app`, fresh control dir + mock log, `T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD=false`
+so there is no bootstrap project/"New thread"), pairs once, runs the driver, tears the process group down. So every shot shows
+only its own scenario: one project, its own threads, `Changes +0 -0` until the scenario edits files.
 
 ```sh
-gh workflow run sandbox.yml --ref mockkit-core -f profile=t3code-mock -f repo=pingdotgg/t3code \
-  -f base_ref=main -f head_ref=main -f sides=after -f scenario=targets/t3code-mock/set-all.mjs
+# web pack, or any subset (comma ids, short prefix, pack name from mockkit/packs.json: web | smoke | explore | all)
+gh workflow run sandbox.yml --ref <branch> -f profile=t3code-mock -f repo=pingdotgg/t3code \
+  -f base_ref=main -f head_ref=main -f sides=after -f scenarios=web          # or s07  /  s03,s17
 ```
+
+`sandbox.yml` input `scenarios` is exported as env `SCENARIOS` to the scenario step (the older `scenario` path input still works;
+`-f scenario=targets/t3code-mock/set-all.mjs` = the web pack).
 
 ## Selecting a scenario
 
-Put `[mock:<id>]` (optional `k=v` args) anywhere in the user message: `[mock:slow hold=rec] go`. No tag runs the
+**Hidden routing (default for drivers).** The driver queues the next scenario for the session's cwd and types a natural prompt:
+`mockctl.mjs next slow hold=rec --cwd <ws>` (or `nextScenario(env, "slow", {hold:"rec"})` / `ask(page, env, id, prompt, args)` in
+`lib/ui.mjs`). The agent pops one entry per user turn from `$MOCK_CONTROL_DIR/queue/<sha1(realpath cwd)>.ndjson` (`_any` = any
+session), FIFO, per cwd. Nothing selector-like is ever typed, so no `[mock:` text appears in any recording.
+
+**Prefix fallback (unit tests / manual use).** Put `[mock:<id>]` (optional `k=v` args) anywhere in the user message:
+`[mock:slow hold=rec] go`. A tag wins and does not consume the queue. No tag and empty queue runs the
 `echo` scenario (replies with the turn number and quotes the previous prompt). Text-generation sessions
 (thread titles, commit/PR/branch text; same provider) are detected by `clientInfo.name == "t3-code-git-text"`
 or a "Return JSON ..." preamble and answered with valid JSON **without** running a scenario; thread titles
@@ -74,6 +89,10 @@ T3CODE_OTEL_SDK_DISABLED=true T3CODE_NO_BROWSER=1 T3CODE_DISABLE_AUTO_UPDATE=tru
 * `settings.json` is hot-reloaded: seeding after boot makes Grok READY within seconds, no restart.
 * The pairing token is **one-time**: authenticate once and reuse `storageState` for later scenarios (`scenario.mjs` does).
 * Web onboarding is skipped with localStorage `t3code:client-settings:v1 = {onboardingCompletedAt}` (`skipOnboarding`).
+* `T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD=false` (read by dev-runner) removes the server's cwd bootstrap project + Codex "New thread".
+* Readiness is polled, not slept: the launcher appends every probe to `$MOCK_CONTROL_DIR/probes.log` (boot waits for `models`), the
+  shell is asserted by the sidebar "Add project" button (fails loudly on a bad/used pairing token), and the composer polls until
+  the model picker reads "Mock ...".
 * Real writes made by the mock in the session cwd ARE seen by the Changes panel / diff (header `+5 -1`, per-file diff, "N changed files" card).
 * The composer defaults to "Full access", which auto-approves: approval scenarios must switch to "Supervised" first.
 * Selecting an option in the ask-user-question panel submits immediately.
@@ -83,7 +102,7 @@ T3CODE_OTEL_SDK_DISABLED=true T3CODE_NO_BROWSER=1 T3CODE_DISABLE_AUTO_UPDATE=tru
 
 * Only the ACP flavor (grok) is implemented. Codex / pi / claude / opencode adapters and mobile/desktop are not built.
 * Standard ACP `plan` renders as a todo list; a ProposedPlanCard needs xAI `exit_plan_mode` frames (not implemented).
-* The bootstrap project/thread (`server`, on the Codex model) from `autoBootstrapProjectFromCwd` remains in the sidebar.
-* All scenarios share one server/DB; each starts a fresh thread, so the sidebar accumulates (order-dependent shots).
+* Cost of isolation: one cold `vp run dev` boot per scenario (~30 s each) instead of one shared server.
+* Runner hostname (`runnervm...`) still shows in the project panel (not masked).
 * Mock state is per process (per session); `session/load` after a respawn starts with turn 0.
 * No fake credential file is written on purpose (the Grok usage probe would call the network).

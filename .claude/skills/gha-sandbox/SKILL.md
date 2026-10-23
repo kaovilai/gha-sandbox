@@ -50,7 +50,7 @@ Scenario tips: mask nondeterministic text (runner hostname), dismiss banners, no
 - Desktop: run built app (`build:desktop` + `start:desktop`); dev mode opens DevTools. Onboarding: Enter x5 then click (832,577) "Do not import projects".
 - Mobile: upstream `scripts/mobile-showcase.ts` (seeded, keyless). Our patches to throwaway checkout: scene timeouts, loopback Metro host, exact-bundle warm (`patch-showcase-warm.py`), caching manifest proxy `scripts/metro-manifest-proxy.mjs` (dev launcher 10 s timeout, HEAD probe).
 - iOS pairing intermittently fails ("No environments connected"); see README.
-- Real AI turns need mock providers: mockkit (in progress, branch `mockkit-core`).
+- Keyless real-looking turns: mockkit (web, profile `t3code-mock`). `-f profile=t3code-mock -f sides=after -f scenarios=web|s07|s03,s17` (packs `mockkit/packs.json`; `scenario` path input still ok). One fresh T3 + workspace per scenario (no cross-scenario state). Drivers route hidden via `mockctl next <id>` queue, no `[mock:` in UI. Detail `mockkit/README.md`.
 
 ## Caching
 
