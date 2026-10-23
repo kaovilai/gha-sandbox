@@ -16,12 +16,27 @@ fi
 # Free runners are slower than upstream's: first Metro bundle can exceed the hard-coded
 # 90-120 s scene waits. Patch our throwaway checkout only.
 perl -pi -e 's/waitForScene\(120_000\)/waitForScene(900_000)/; s/timeoutMs = 90_000,/timeoutMs = 900_000,/' scripts/mobile-showcase.ts
-pnpm screenshots:mobile "${args[@]}" 2>&1 | tee "$out/pass1.log"
-rc1=${PIPESTATUS[0]}
+if [ "${LIVE:-0}" = 1 ]; then
+  # Live mock threads (mockkit): keep servers/Metro/emulator/app up after the capture pass, then drive them.
+  python3 "$root/scripts/patch-showcase-live.py" apps/mobile/src/features/showcase/ShowcaseCaptureCoordinator.tsx || echo "WARN: live-nav patch failed"
+  # file, not a pipe: kept Metro holds stdout open and would stop `| tee` from ever seeing EOF
+  pnpm screenshots:mobile "${args[@]}" --keep-running > "$out/pass1.log" 2>&1
+  rc1=$?
+  tail -30 "$out/pass1.log" | cut -c1-200
+else
+  pnpm screenshots:mobile "${args[@]}" 2>&1 | tee "$out/pass1.log"
+  rc1=${PIPESTATUS[0]}
+fi
 mkdir -p "$out/screenshots"
 cp -r artifacts/app-store/screenshots/google-play/. "$out/screenshots/" 2>/dev/null || true
 
-if [ "$rc1" -eq 0 ]; then
+if [ "$rc1" -eq 0 ] && [ "${LIVE:-0}" = 1 ]; then
+  sroot=$(sed -n 's/^Showcase environments kept at \(.*\) (.*/\1/p' "$out/pass1.log" | tail -1)
+  echo "showcase root: $sroot"
+  LIVE_OUT="$out/live" bash "$root/scripts/mobile-live.sh" android "$sroot" 2>&1 | tee "$out/live.log"
+  echo "mobile-live exit ${PIPESTATUS[0]}"
+  pkill -f 'apps/server/src/bin.ts serve' 2>/dev/null; pkill -f 'expo start' 2>/dev/null; true
+elif [ "$rc1" -eq 0 ]; then
   # screenrecord caps at 180 s; chain segments until the capture pass ends.
   ( n=0; while :; do adb shell screenrecord --time-limit 170 "/data/local/tmp/rec$n.mp4" || true; n=$((n+1)); done ) &
   loop=$!

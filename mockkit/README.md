@@ -70,7 +70,7 @@ Status = what a CI run showed (screenshots viewed). Evidence lives under `eviden
 | s28-background-task | upstream agent with `T3_ACP_EMIT_GROK_BACKGROUND_TASK_STARTED=1` | partial: a running tool row ("Sleep 40; echo done-a", Working 16s) is shown; no dedicated background-task banner was observed (39942756494) |
 | s31-sidebar-thread-actions | right-click menu: pin, settle, snooze submenu + snooze, rename, archive with undo notice | ok (39941468815) |
 | s33-command-palette-tour | Ctrl+K command list, Go to file, Search project contents | ok (39938011625) |
-| s34-settings-tour | every Settings route, appearance cycle light/dark | ok (39938011625). Theme-card clicks did not visibly change the theme |
+| s34-settings-tour | Settings routes (source-control is a skeleton-load shot, licenses highlights General), appearance cycle light/dark via shortcut | partial (39938011625). Theme-card clicks do NOT change the theme; drivers have little page assertion |
 | s37-files-browser | right-panel Files tree + source / markdown (source view) / csv table / svg image previews | ok (39941468815). Tree-row clicks on files did not register, files are opened through the Ctrl+P file picker |
 
 Helpers: `lib/ui-extra.mjs` (`seedInstances` = extra grok-driver provider instances via the hot-reloaded settings.json, `seedUpstreamGrok` /
@@ -100,13 +100,13 @@ become the scenario's `title`, so the sidebar reads "Failing turn", "Approval re
 3. `mockkit/scenarios-ui/s<NN>-<name>.mjs`: use `startSession(page, env)` (adds the demo project, opens a new thread on
    the mock model), `sendPrompt`, then wait on text and `shot("name")`. Files come out as `<id>-<name>.png` and
    `<id>.webm` (flat: the publish job only globs the top level).
-4. Add the id to `targets/t3code-mock/set-all.mjs` (or set `SCENARIOS`).
+4. Add the id to a pack in `mockkit/packs.json` (or pass `scenarios=<id>`; prefixes like `s07` work).
 
 ## Env vars
 
 `MOCK_LOG` (NDJSON), `MOCK_PACE` (fast/real/slow), `MOCK_SEED`, `MOCK_DEFAULT_SCENARIO`, `MOCK_CONTROL_DIR`,
 `MOCK_HOLD_TIMEOUT_MS`, `MOCK_CLI_MODE` (ready/unauth/old/broken/missing, launcher probe output),
-`MOCK_KEEP_OTHER_PROVIDERS`, `MOCK_NODE`. Baseline no-cloud env set by `start.sh`: `T3CODE_TELEMETRY_ENABLED=false
+`MOCK_KEEP_OTHER_PROVIDERS`, `MOCK_NODE`. Baseline no-cloud env set by `lib/boot.mjs`: `T3CODE_TELEMETRY_ENABLED=false
 T3CODE_OTEL_SDK_DISABLED=true T3CODE_NO_BROWSER=1 T3CODE_DISABLE_AUTO_UPDATE=true`.
 
 ## Findings (verified in CI)
@@ -153,6 +153,36 @@ Cannot render / not available under Xvfb (observed or by construction):
   auto-update (disabled), `t3code://` URL-handler registration / xdg-open, drag and drop from a file manager, IME.
 * Right-click gives Chromium's native Cut/Copy/Paste/Select All popup (visible in root captures only); the sidebar thread row has no thread-specific native menu here.
 
+## Mobile: live mock threads (S40-S42)
+
+`android-app.yml -f live=true` (and `ios-app.yml -f live=true`, best effort) run the upstream showcase with `--keep-running`, then
+`scripts/mobile-live.sh <android|ios> <showcaseRoot>` drives the already-paired app against the showcase's own server
+(`<root>/environments/moonbase-terminal`, project `t3code`). Default path (`live=false`) is untouched.
+
+1. Hot-seed `seed/settings.mjs` into `<baseDir>/userdata` with `MOCK_KEEP_OTHER_PROVIDERS=1` and `MOCK_DEFAULT_RUNTIME_MODE=approval-required`
+   (CLI-started threads take their mode from the environment default, so approvals are not auto-accepted).
+2. Start threads with the server CLI: `node apps/server/src/bin.ts thread start --base-dir <baseDir> --title T --provider grok --model grok-build --json t3code "<prompt>"`
+   (MCP `t3_thread_launch`); read truth with `thread show --json <id>` (`.thread.status`, `.pendingRequestCount`, assistant text).
+3. Hidden routing + gates: `mockctl next live-stream gate=g40 hold=live40 --cwd <workspace>`; the scenario waits on `gate` so the thread can be
+   opened in the app first, then `mockctl release g40`.
+4. UI state: `adb shell uiautomator dump` (Android) / `axe describe-ui` (iOS) parsed by `scripts/uia.mjs`; taps by label bounds.
+   Screenshots + `screenrecord`/`simctl recordVideo` clips land in `out/<platform>-app/live/`.
+5. `scripts/patch-showcase-live.py` (throwaway checkout, JS only): the showcase coordinator re-navigates to its fixture route whenever the
+   route's scene differs from the requested scene; the patch navigates once per scene request so manual taps/BACK stick.
+
+| id | scenario | proof |
+| --- | --- | --- |
+| S40 | `live-stream`: gate, steps 1-5, hold, steps 6-8 | timed shots (3 steps, 5 steps, held with "Working" + stop button, complete 8 steps), server status `running` then `completed` |
+| S41 | `live-approval`: gate then approval, tap **Approve** | card shot, resolved shot (only "Worked for ..." and +3 -0 are visible; the "Approved: NOTES.md was written" text is NOT in the shot, so resolution is proven by server truth: `NOTES.md` exists in the workspace, pending 1 then 0) |
+| S42 | `ask`: tap option, **Submit answers** | card, option selected, answered, server `pending` 1 then 0 |
+
+Findings (Android, CI): (a) uiautomator cannot reach an idle tree while text streams in and then leaves the previous dump on disk;
+`dump()` deletes the file first, retries, and streaming growth is proven by screenshots + server text instead; (b) intermittently (2 of 4 Android runs), a pending approval or
+question that exists when a thread is opened is not rendered until the thread is remounted (BACK, reopen); the driver remounts once if the
+card is absent after the first wait;
+(c) approval buttons are `Cancel`, `Decline`, `Allow all edits this session`, `Approve` (not "Allow once"); (d) assistant markdown text
+nodes are sometimes absent from the accessibility tree, so final-state checks also read the server.
+
 ## Known limits
 
 * Only the ACP flavor (grok) is implemented. Codex / pi / claude / opencode adapters and mobile/desktop are not built.
@@ -165,3 +195,12 @@ Cannot render / not available under Xvfb (observed or by construction):
 * Runner hostname (`runnervm...`) still shows in the project panel (not masked).
 * Mock state is per process (per session); `session/load` after a respawn starts with turn 0.
 * No fake credential file is written on purpose (the Grok usage probe would call the network).
+
+## Known evidence limits (from adversarial review, 2026-10)
+
+- Many drivers assert little; a green `RESULT ok` means the flow ran, not that the screenshot proves the state. View the PNG.
+- S24: the commit message source (text-gen stub) is inferred, not shown in the logs. S28: only a running tool row, no distinct background-task UI. S37: tree-row clicks do not register in Playwright (drivers fall back to Ctrl+P); markdown shows as source. S20: reply shows the leaked handoff prompt, not natural chat.
+- S07: T3 does not render in-progress stdout, so no mid-stream output still exists (an in-progress status still + the completed output are captured).
+- S40 clip is a 30 s tail starting at the held state; early growth is in the timed PNGs. The `s40-held` UI dump can have 0 nodes (vacuous guard); server truth is the real check.
+- Runner hostname still visible in the project panel in web/desktop shots (mask in scenarios when it matters).
+- iOS live path (`mobile-live.sh ios`) is written but untested: the upstream showcase pairing flake blocked both attempts.

@@ -16,6 +16,10 @@ on:
         description: Keep simulator+Metro after capture and record a scroll clip (else record throughout, trim last 15 s)
         type: boolean
         default: false
+      live:
+        description: After the showcase pass, drive LIVE mockkit threads in the app (implies keep_running)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,7 +31,8 @@ jobs:
     env:
       NODE_OPTIONS: --max-old-space-size=6144
       OUT_DIR: ${{ github.workspace }}/out/ios-app
-      IOS_KEEP_RUNNING: ${{ inputs.keep_running && '1' || '0' }}
+      IOS_KEEP_RUNNING: ${{ (inputs.keep_running || inputs.live) && '1' || '0' }}
+      IOS_LIVE: ${{ inputs.live && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
 
