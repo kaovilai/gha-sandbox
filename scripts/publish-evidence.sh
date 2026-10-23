@@ -20,9 +20,10 @@ while IFS= read -r -d '' f; do
     *.png) cp "$f" "$pub/$flat" ;;
     *.mp4|*.webm)
       base=${flat%.*}
-      timeout 120 ffmpeg -nostdin -loglevel error -y -i "$f" -c:v libx264 -pix_fmt yuv420p "$pub/$base.mp4"
-      # GIF for inline embedding: first 15 s, <=480 px wide, 8 fps.
-      timeout 120 ffmpeg -nostdin -loglevel error -y -t 15 -i "$f" -vf "fps=8,scale='min(480,iw)':-1:flags=lanczos" "$pub/$base.gif"
+      # Long recordings: keep the last 30 s (-sseof is a no-op for shorter clips).
+      timeout 300 ffmpeg -nostdin -loglevel error -y -sseof -30 -i "$f" -c:v libx264 -pix_fmt yuv420p "$pub/$base.mp4"
+      # GIF for inline embedding: last 15 s, <=480 px wide, 8 fps.
+      timeout 300 ffmpeg -nostdin -loglevel error -y -sseof -15 -i "$f" -vf "fps=8,scale='min(480,iw)':-1:flags=lanczos" "$pub/$base.gif"
       ;;
   esac
 done < <(find "$src" -type f \( -name '*.png' -o -name '*.mp4' -o -name '*.webm' \) -print0)

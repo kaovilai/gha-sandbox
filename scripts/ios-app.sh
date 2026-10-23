@@ -45,9 +45,10 @@ else
   rc1=$?
   pkill -INT -f 'simctl io booted recordVideo' || true
   sleep 5
+  # Whole-run recording; publish-evidence.sh keeps only the tail (final capture) for MP4/GIF.
   if [ -s "$out/full.mp4" ]; then
-    ffmpeg -nostdin -loglevel error -y -sseof -15 -i "$out/full.mp4" -c copy "$out/recording.mp4" || true
-    rm -f "$out/full.mp4" "$out"/full.mp4.sb-* 2>/dev/null || true
+    mv "$out/full.mp4" "$out/recording.mp4"
+    rm -f "$out"/full.mp4.sb-* 2>/dev/null || true
   fi
 fi
 tail -40 "$out/pass1.log" | cut -c1-200
