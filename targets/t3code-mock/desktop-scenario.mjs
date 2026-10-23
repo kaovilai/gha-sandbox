@@ -67,7 +67,7 @@ async function attach(app, id) {
   let page = null;
   while (!page && Date.now() < deadline) {
     for (const c of browser.contexts()) {
-      page = c.pages().find((p) => /^https?:\/\//.test(p.url()) && !/devtools/i.test(p.url())) ?? page;
+      page = c.pages().find((p) => /^(https?|t3code):\/\//.test(p.url()) && !/devtools/i.test(p.url())) ?? page;
     }
     if (!page) await sleep(500);
   }

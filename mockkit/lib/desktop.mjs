@@ -130,7 +130,7 @@ export async function bootDesktop({
         try {
           const list = await (await fetch(`${cdpUrl}/json/list`)).json();
           cdpState = `targets: ${list.map((t) => `${t.type}:${t.url.slice(0, 80)}`).join(" | ")}`;
-          return list.find((t) => t.type === "page" && /^https?:\/\//.test(t.url) && !/devtools/i.test(t.url))?.url ?? null;
+          return list.find((t) => t.type === "page" && /^(https?|t3code):\/\//.test(t.url) && !/devtools/i.test(t.url))?.url ?? null;
         } catch (e) {
           cdpState = `fetch failed: ${e.message}`;
           return null;
