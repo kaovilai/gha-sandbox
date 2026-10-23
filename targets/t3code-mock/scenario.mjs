@@ -101,6 +101,8 @@ for (const entry of ids) {
   try {
     // seed (settings.mjs) reads MOCK_PROVIDER: which mock providers are READY; the driver runs against entry.prov
     process.env.MOCK_PROVIDER = mod.meta?.seed?.[entry.prov] ?? entry.prov;
+    // a driver may export `meta.env = { MOCK_CODEX_ACCOUNT: "chatgpt", ... }`: extra env for the seeded mock (settings.mjs forwards MOCK_CODEX_*)
+    for (const [k, v] of Object.entries(mod.meta?.env ?? {})) process.env[k] = v;
     srv = await bootT3({ id });
     const { stateFile, origin } = await authenticate(srv, id, mod.meta?.firstRun === true);
     process.env.APP_URL = `${origin}/`;
@@ -132,6 +134,7 @@ for (const entry of ids) {
     ok = false;
     console.log(`scenario ${id} error: ${e?.stack ?? e}`);
   } finally {
+    for (const k of Object.keys(mod.meta?.env ?? {})) delete process.env[k];
     if (srv) {
       printMockFrames(srv.mockLog, id);
       await srv.stop().catch((e) => console.log(`stop ${id}: ${e.message}`));

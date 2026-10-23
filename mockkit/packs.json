@@ -89,6 +89,18 @@
     "s03-markdown-stream",
     "s17-multi-turn-context"
   ],
+  "codex-extra": [
+    "s50-mcp-elicitation",
+    "s51-permission-request",
+    "s52-subagents",
+    "s53-goal",
+    "s54-thread-revert",
+    "s55-chatgpt-account",
+    "s56-web-search",
+    "s57-provider-retry",
+    "s58-mcp-app",
+    "s59-subagent-approval"
+  ],
   "explore": [
     "s00-explore"
   ],

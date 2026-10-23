@@ -55,7 +55,18 @@ export async function assertShell(page, label = "app shell", timeout = 60_000) {
 export async function addProject(page, wsPath, { shot } = {}) {
   const name = wsPath.split("/").filter(Boolean).at(-1);
   await assertShell(page);
-  await page.getByRole("button", { name: "Add project" }).first().click();
+  // T3's openAddProjectFlow navigates to /settings/connections when no environment is connected yet (the "Add project"
+  // button renders before the websocket env connects, esp. right after a page.reload). Detect that and retry.
+  for (let attempt = 1; ; attempt++) {
+    await page.getByRole("button", { name: "Add project" }).first().click();
+    await page.waitForTimeout(700);
+    if (!/\/settings\//.test(page.url())) break;
+    if (attempt >= 8) throw new Error(`"Add project" kept opening Settings (no connected environment) after ${attempt} tries; url=${page.url()}`);
+    console.log(`addProject: clicked before environment connected (landed on ${new URL(page.url()).pathname}); retry ${attempt}`);
+    await page.goto(new URL("/", page.url()).href, { waitUntil: "load" });
+    await assertShell(page);
+    await page.waitForTimeout(1500 * attempt);
+  }
   const input = page.locator("input:visible").last();
   await input.waitFor({ state: "visible", timeout: 15_000 });
   await shot?.("add-project");

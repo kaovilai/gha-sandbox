@@ -5,7 +5,7 @@
 //
 //   {say:{text,chunk?,paceMs?}}          stream assistant text (chunk = words/chunk)
 //   {think:{text,chunk?,paceMs?}}        stream reasoning text
-//   {tool:{kind,title,input?,output?,diff?,locations?,status?}}   one tool call (start -> completed)
+//   {tool:{kind,title,input?,output?,diff?,locations?,status?,server?,name?}}   one tool call (start -> completed); server/name = MCP identity (Codex)
 //   {read:{path}}                        REAL file read shown as a read tool call
 //   {fsWrite:{path,content,silent?}}     REAL write in session cwd (+ edit tool call w/ diff)
 //   {sh:{cmd,title?}}                    REAL `sh -c` in session cwd, stdout/stderr streamed as tool output
@@ -20,8 +20,22 @@
 //                                        optional hold gate `until` is released). ACP/Grok adapter only; others run it as a plain `sh` step.
 //   {hold:{name}}                        block until $MOCK_CONTROL_DIR/release/<name> exists
 //   {sleep:{ms}}                         sleep
+//   Codex-flavored ops (provider-neutral: adapters without a native form degrade, see below):
+//   {elicit:{server,message,appName?,persist?,onAccept,onDecline}}  MCP elicitation (Codex mcpServer/elicitation/request);
+//                                        degrade: a plain permission request
+//   {grant:{reason,read?,write?,network?,onAllow,onReject}}  extra-permission request (Codex item/permissions/requestApproval);
+//                                        degrade: a plain permission request
+//   {subagent:{name,prompt,steps,model?,result?}}   spawn an agent that runs `steps` on its own thread (Codex collabAgentToolCall);
+//                                        degrade: one tool call, child text becomes its output
+//   {goal:{status?,tokensUsed?,timeUsedSeconds?}}   update the thread goal set by `/goal` (Codex thread/goal/*); degrade: no-op
+//   {web:{query,url?}}                   web search (Codex webSearch item); degrade: a fetch-kind tool call
+//   {mcpApp:{server,name,title?,html,input?,output?}}  MCP tool call whose result is an interactive HTML app (Codex mcpToolCall +
+//                                        mcpAppUi + mcpServer/resource/read); degrade: a plain tool call
+//   {retry:{message,attempt,max}}        transient provider retry notice (Codex error willRetry:true); degrade: no-op
+//   say takes `phase:"commentary"` (Codex agentMessage phase); ignored elsewhere.
 //
-// Adapters implement the `sink` (message, thought, toolStart, toolUpdate, permission, ask, plan).
+// Adapters implement the `sink` (message, thought, toolStart, toolUpdate, permission, ask, plan; optional:
+// exitPlan, elicit, grant, subagent, goal, web, retry).
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -53,6 +67,13 @@ export const S = {
   error: (message, code, kind) => ({ error: { message, code, kind } }),
   hold: (name) => ({ hold: { name } }),
   sleep: (ms) => ({ sleep: { ms } }),
+  elicit: (o) => ({ elicit: o }),
+  grant: (o) => ({ grant: o }),
+  subagent: (o) => ({ subagent: o }),
+  goal: (o = {}) => ({ goal: o }),
+  mcpApp: (o) => ({ mcpApp: o }),
+  web: (query, o = {}) => ({ web: { query, ...o } }),
+  retry: (message, attempt = 1, max = 5) => ({ retry: { message, attempt, max } }),
 };
 
 export function flatten(steps) {
@@ -80,7 +101,7 @@ export async function runSteps(stepsIn, sink, ctx) {
       case "say":
       case "think": {
         const words = a.chunk ?? pace.chunkWords;
-        const emit = type === "say" ? (t) => sink.message(t) : (t) => sink.thought(t);
+        const emit = type === "say" ? (t) => sink.message(t, { phase: a.phase }) : (t) => sink.thought(t);
         const chunks = chunkText(a.text, words);
         for (let i = 0; i < chunks.length; i++) {
           emit(chunks[i]);
@@ -91,7 +112,7 @@ export async function runSteps(stepsIn, sink, ctx) {
       case "tool": {
         const id = ctx.nextToolId();
         await sleep(pace.toolMs, signal);
-        sink.toolStart({ id, kind: a.kind ?? "other", title: a.title, input: a.input, diff: a.diff, locations: a.locations, status: "in_progress" });
+        sink.toolStart({ id, kind: a.kind ?? "other", title: a.title, input: a.input, diff: a.diff, locations: a.locations, server: a.server, name: a.name, status: "in_progress" });
         await sleep(pace.toolMs, signal);
         sink.toolUpdate({ id, status: a.status ?? "completed", text: a.output, diff: a.diff, output: a.rawOutput ?? a.output });
         break;
@@ -212,6 +233,68 @@ export async function runSteps(stepsIn, sink, ctx) {
         log?.("exitPlan", { outcome: res?.outcome });
         break;
       }
+      case "elicit":
+      case "grant": {
+        // Codex-native approval variants. Sinks without them (ACP) degrade to a plain permission request.
+        const native = type === "elicit" ? sink.elicit : sink.grant;
+        const id = ctx.nextToolId();
+        await sleep(pace.toolMs, signal);
+        let decision;
+        if (native) {
+          decision = await native.call(sink, { id, ...a });
+        } else {
+          const title = type === "elicit" ? a.message : (a.reason ?? "Extra permissions");
+          sink.toolStart({ id, kind: "other", title, input: { server: a.server, read: a.read, write: a.write, network: a.network }, status: "pending" });
+          decision = await sink.permission({ id, kind: "other", title, input: { server: a.server } });
+        }
+        log?.("decision", { decision, op: type });
+        if (decision === "cancel") throw abortError();
+        const rejected = decision === "reject" || decision === "decline";
+        if (!native) sink.toolUpdate({ id, status: rejected ? "failed" : "completed", text: rejected ? "Declined by user." : "Approved." });
+        await runSteps((rejected ? (a.onDecline ?? a.onReject) : (a.onAccept ?? a.onAllow)) ?? [], sink, ctx);
+        break;
+      }
+      case "subagent": {
+        const id = ctx.nextToolId();
+        await sleep(pace.toolMs, signal);
+        if (sink.subagent) {
+          await sink.subagent({ id, ...a }, (steps, childSink) => runSteps(steps, childSink, ctx));
+          break;
+        }
+        // Degrade: one tool call whose output is the child's text; the child's own tool calls are not shown.
+        sink.toolStart({ id, kind: "other", title: `Subagent ${a.name ?? "worker"}: ${a.prompt ?? ""}`.trim(), input: { prompt: a.prompt }, status: "in_progress" });
+        let text = "";
+        const quiet = { message: (t) => (text += t), thought() {}, toolStart() {}, toolUpdate() {}, plan() {}, permission: async () => "allow", ask: async () => ({ answers: {} }), exitPlan: async () => ({}) };
+        await runSteps(a.steps ?? [], quiet, ctx);
+        sink.toolUpdate({ id, status: "completed", text: a.result ?? text, output: a.result ?? text });
+        break;
+      }
+      case "mcpApp": {
+        const id = ctx.nextToolId();
+        await sleep(pace.toolMs, signal);
+        if (sink.mcpApp) {
+          await sink.mcpApp({ id, ...a });
+          break;
+        }
+        await runSteps([{ tool: { kind: "other", title: a.title ?? `${a.server}.${a.name}`, input: a.input, output: a.output ?? "(interactive MCP app, not rendered by this provider)" } }], sink, ctx);
+        break;
+      }
+      case "goal":
+        sink.goal?.(a);
+        break;
+      case "web": {
+        if (sink.web) {
+          const id = ctx.nextToolId();
+          await sleep(pace.toolMs, signal);
+          await sink.web({ id, ...a });
+          break;
+        }
+        await runSteps([{ tool: { kind: "fetch", title: `Search the web: ${a.query}`, input: { query: a.query }, output: a.url ? `Result: ${a.url}` : "Search complete" } }], sink, ctx);
+        break;
+      }
+      case "retry":
+        sink.retry?.(a);
+        break;
       case "error":
         throw new ScenarioError(a.message, a.code, a.kind);
       case "hold":

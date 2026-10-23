@@ -25,6 +25,8 @@ const env = (extra = {}) =>
     MOCK_LOG: process.env.MOCK_LOG ?? "/tmp/mockkit/mock.ndjson",
     MOCK_CONTROL_DIR: process.env.MOCK_CONTROL_DIR ?? "/tmp/mockkit/control",
     MOCK_NODE: process.execPath,
+    // Codex account/behaviour knobs (chatgpt plan, reset credits, legacy approvals): forwarded when set by the driver meta.env
+    ...Object.fromEntries(["MOCK_CODEX_ACCOUNT", "MOCK_CODEX_PLAN", "MOCK_CODEX_RESET_CREDITS", "MOCK_CODEX_LEGACY_APPROVALS"].filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])),
     ...extra,
   }).map(([name, value]) => ({ name, value }));
 
