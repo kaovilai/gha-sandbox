@@ -32,7 +32,7 @@ and makes the mock the default model). `MOCK_KEEP_OTHER_PROVIDERS=1` keeps them.
 | `seed/settings.mjs`, `seed/workspace.sh` | write `settings.json` (+ `client-settings.json`) and create the demo workspace repo |
 | `scenarios/*.mjs` | mock scripts: echo, markdown-stream, think, tool-read, edit-file-diff, approval-allow, error-turn, shell, slow, ask, plan |
 | `scenarios-ui/<id>.mjs` | Playwright drivers (`export default async ({page, shot, env}) => ...`) |
-| `test/acp.test.mjs` | `node --test mockkit/test`, no T3 needed (<3 s) |
+| `test/acp.test.mjs` | `node --test mockkit/test`, no T3 needed (~10 s; CI: `mockkit-test.yml`) |
 
 CI: `targets/t3code-mock/` (profile.env/setup.sh copied from `targets/t3code`; `start.sh` boots the app, discovers
 the state dir, seeds settings; `scenario.mjs` runs the drivers listed in `$SCENARIOS`; `set-all.mjs` is a preset

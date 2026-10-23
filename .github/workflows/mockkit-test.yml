@@ -1,0 +1,27 @@
+name: mockkit-test
+
+# Unit tests for the zero-dependency mock provider kit (no target checkout, no secrets).
+
+on:
+  push:
+    paths: ["mockkit/**", ".github/workflows/mockkit-test.yml"]
+  pull_request:
+    paths: ["mockkit/**", ".github/workflows/mockkit-test.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Syntax check every mock module
+        run: find mockkit -name '*.mjs' -print0 | xargs -0 -n1 node --check
+      - name: node --test
+        run: node --test mockkit/test
