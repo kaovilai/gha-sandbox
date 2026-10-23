@@ -7,7 +7,7 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(2500);
   await shot("running");
   // expand the live command row so streamed output (colour + progress lines) is visible mid-run
-  await page.getByText(/Running command/).first().click().catch(() => {});
+  await page.getByText(/while \[/).first().click().catch(() => {});
   await page.waitForTimeout(2000);
   await shot("running-expanded");
   await dumpPage(page, "s07 running");
@@ -15,7 +15,7 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(1000);
   await expandWork(page);
   // open the command row to show the streamed output
-  if (!(await page.getByText(/build finished/).first().isVisible().catch(() => false))) {
+  if (!(await page.getByText(/compiling module-8/).first().isVisible().catch(() => false))) {
     await page.getByText(/while \[/).first().click().catch(() => {});
   }
   await page.waitForTimeout(1000);
