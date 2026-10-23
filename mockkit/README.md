@@ -102,6 +102,9 @@ T3CODE_OTEL_SDK_DISABLED=true T3CODE_NO_BROWSER=1 T3CODE_DISABLE_AUTO_UPDATE=tru
 
 * Only the ACP flavor (grok) is implemented. Codex / pi / claude / opencode adapters and mobile/desktop are not built.
 * Standard ACP `plan` renders as a todo list; a ProposedPlanCard needs xAI `exit_plan_mode` frames (not implemented).
+* T3 (web) does not render streamed stdout of an in-progress command: the row reads "Running command" and is not expandable until the
+  step completes (run 39935674895). S07 therefore stills the genuine in-progress state (`running-live-status`) and the completed
+  output (`done`); a driver FINDING line records it. A `running-midstream` shot is only taken if "step 3/8".."5/8" ever appears in the DOM.
 * Cost of isolation: one cold `vp run dev` boot per scenario (~30 s each) instead of one shared server.
 * Runner hostname (`runnervm...`) still shows in the project panel (not masked).
 * Mock state is per process (per session); `session/load` after a respawn starts with turn 0.
