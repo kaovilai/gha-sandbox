@@ -34,7 +34,8 @@ if [ "$rc1" -eq 0 ] && [ "${LIVE:-0}" = 1 ]; then
   sroot=$(sed -n 's/^Showcase environments kept at \(.*\) (.*/\1/p' "$out/pass1.log" | tail -1)
   echo "showcase root: $sroot"
   LIVE_OUT="$out/live" bash "$root/scripts/mobile-live.sh" android "$sroot" 2>&1 | tee "$out/live.log"
-  echo "mobile-live exit ${PIPESTATUS[0]}"
+  live_rc=${PIPESTATUS[0]}
+  echo "mobile-live exit $live_rc"
   pkill -f 'apps/server/src/bin.ts serve' 2>/dev/null; pkill -f 'expo start' 2>/dev/null; true
 elif [ "$rc1" -eq 0 ]; then
   # screenrecord caps at 180 s; chain segments until the capture pass ends.
@@ -50,4 +51,5 @@ elif [ "$rc1" -eq 0 ]; then
 fi
 cd "$root"
 find "$out" -type f | head -40
+[ "$rc1" -eq 0 ] && rc1=${live_rc:-0}
 exit "$rc1"

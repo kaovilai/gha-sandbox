@@ -230,6 +230,16 @@ ensure_operable() { # <title>
   return 1
 }
 
+# A running thread's view is often blank to uiautomator (animating "Working" row / stale view): remount (up to 3x, growing waits) until the text shows.
+remount_until() { # <title> <regex> <tag>
+  local i
+  for i in 1 2 3; do
+    open_thread "$1" && wait_ui "$2" $((30 + 20 * i)) "$3-r$i" >/dev/null && return 0
+    log "remount $i/3 did not show /$2/"
+  done
+  return 1
+}
+
 results=()
 record_result() { results+=("$1=$2"); echo "LIVE RESULT $1 $2"; }
 rlabel() { [ "$PROV" = codex ] && echo "codex-$1" || echo "$1"; }
@@ -283,7 +293,7 @@ run_s40() {
   # (scene toggle, reopen) and require the text there; only then is the state proven in the UI. Never "ok" on server truth alone.
   if ! wait_ui "Step 5 of 8" 30 s40-held-ui >/dev/null; then
     log "UI lacks 'Step 5 of 8' while held (stale/blank thread view or uiautomator flake); remounting thread"
-    open_thread "$title" && wait_ui "Step 5 of 8" 45 s40-held-ui2 >/dev/null || { shot s40-held-NO-UI-PROOF; rec_stop s40; return 1; }
+    remount_until "$title" "Step 5 of 8" s40-held-ui || { shot s40-held-NO-UI-PROOF; rec_stop s40; return 1; }
     sleep 1
     shot s40-streaming-held-remounted
   fi
@@ -296,7 +306,7 @@ run_s40() {
   ui_state s40-complete
   if ! wait_ui "Live stream complete" 30 s40-done >/dev/null; then
     log "UI lacks 'Live stream complete' (stale/blank thread view or uiautomator flake); remounting thread"
-    open_thread "$title" && wait_ui "Live stream complete" 45 s40-done2 >/dev/null || { shot s40-complete-NO-UI-PROOF; rec_stop s40; return 1; }
+    remount_until "$title" "Live stream complete" s40-done || { shot s40-complete-NO-UI-PROOF; rec_stop s40; return 1; }
     sleep 1
     shot s40-complete-remounted
   fi
