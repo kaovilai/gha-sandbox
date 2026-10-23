@@ -1,4 +1,4 @@
-// Scenario harness. Env: PAIRING_URL (authenticated app URL), OUT_DIR, SIDE.
+// Scenario harness. Env: APP_URL (URL to open; legacy PAIRING_URL accepted), OUT_DIR, SIDE.
 // Writes <OUT_DIR>/<name>.png via shot(name) and <OUT_DIR>/<video>.webm on close.
 import { chromium } from "playwright";
 import { mkdirSync, readdirSync, renameSync } from "node:fs";
@@ -6,8 +6,8 @@ import { join } from "node:path";
 
 export async function run(fn, { viewport = { width: 1440, height: 900 }, video = true } = {}) {
   const out = process.env.OUT_DIR ?? "out";
-  const url = process.env.PAIRING_URL;
-  if (!url) throw new Error("PAIRING_URL unset");
+  const url = process.env.APP_URL ?? process.env.PAIRING_URL;
+  if (!url) throw new Error("APP_URL unset");
   mkdirSync(out, { recursive: true });
 
   const browser = await chromium.launch();

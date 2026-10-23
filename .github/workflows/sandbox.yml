@@ -6,6 +6,9 @@ name: sandbox
 on:
   workflow_dispatch:
     inputs:
+      profile:
+        description: Target profile (dir under targets/)
+        default: t3code
       repo:
         description: Target repo (owner/name)
         default: pingdotgg/t3code
@@ -16,8 +19,8 @@ on:
         description: After ref (branch/sha, or pull/<N>/head for a PR)
         required: true
       scenario:
-        description: Scenario path in this repo
-        default: scenarios/example.mjs
+        description: Scenario path in this repo (default targets/<profile>/scenario.mjs)
+        default: ""
       sides:
         description: Which sides to run
         type: choice
@@ -57,7 +60,10 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       SIDE: ${{ matrix.side }}
+      PROFILE: ${{ inputs.profile }}
       OUT_DIR: ${{ github.workspace }}/out/${{ matrix.side }}
+      APP_LOG: ${{ runner.temp }}/app.log
+      APP_URL_FILE: ${{ runner.temp }}/app.url
     steps:
       - uses: actions/checkout@v4
 
@@ -70,13 +76,32 @@ jobs:
           git -C target fetch --depth=1 "https://github.com/$REPO" "$REF"
           git -C target checkout --detach FETCH_HEAD
 
-      - name: Setup vp + install target deps
+      - name: Read profile
+        id: profile
+        run: |
+          test -d "targets/$PROFILE" || { echo "unknown profile: $PROFILE"; ls targets; exit 1; }
+          set -a; . "targets/$PROFILE/profile.env"; set +a
+          echo "vp=${USES_VP:-0}" >> "$GITHUB_OUTPUT"
+          echo "node=${NODE_VERSION:-22}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup vp (profile uses Vite+)
+        if: steps.profile.outputs.vp == '1'
         uses: voidzero-dev/setup-vp@v1.21.2
         with:
-          node-version: "24"
+          node-version: ${{ steps.profile.outputs.node }}
           working-directory: target
           cache: true
-          run-install: true
+          run-install: false
+
+      - name: Setup Node
+        if: steps.profile.outputs.vp != '1'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.profile.outputs.node }}
+
+      - name: Install target deps (profile setup.sh)
+        working-directory: target
+        run: bash "$GITHUB_WORKSPACE/targets/$PROFILE/setup.sh"
 
       - name: Install harness (Playwright, ffmpeg, imagemagick)
         run: |
@@ -84,28 +109,23 @@ jobs:
           npx playwright install --with-deps chromium
           bash scripts/apt-install.sh ffmpeg imagemagick
 
-      - name: Start target dev server
+      - name: Start target app (profile start.sh)
         working-directory: target
         run: |
           mkdir -p "$OUT_DIR"
-          nohup xvfb-run -a vp run dev --home-dir "$RUNNER_TEMP/t3home" > "$RUNNER_TEMP/dev.log" 2>&1 &
-          for i in $(seq 1 90); do
-            url=$(grep -m1 -oE 'pairingUrl: *[^ ]+' "$RUNNER_TEMP/dev.log" | sed 's/pairingUrl: *//' || true)
-            [ -n "$url" ] && break
-            sleep 2
-          done
-          if [ -z "$url" ]; then cat "$RUNNER_TEMP/dev.log"; echo "no pairingUrl"; exit 1; fi
+          bash "$GITHUB_WORKSPACE/targets/$PROFILE/start.sh"
+          url=$(cat "$APP_URL_FILE")
           echo "::add-mask::$url"
-          echo "PAIRING_URL=$url" >> "$GITHUB_ENV"
+          echo "APP_URL=$url" >> "$GITHUB_ENV"
 
       - name: Run scenario
         env:
           SCENARIO: ${{ inputs.scenario }}
-        run: node "$SCENARIO"
+        run: node "${SCENARIO:-targets/$PROFILE/scenario.mjs}"
 
-      - name: Dev server log
+      - name: App log
         if: always()
-        run: cp "$RUNNER_TEMP/dev.log" "$OUT_DIR/dev.log" || true
+        run: cp "$APP_LOG" "$OUT_DIR/app.log" || true
 
       - uses: actions/upload-artifact@v4
         if: always()

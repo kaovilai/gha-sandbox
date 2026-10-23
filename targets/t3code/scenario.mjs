@@ -1,5 +1,5 @@
 // Smoke scenario: load app, dismiss provider banner, screenshot. Copy + edit per PR.
-import { run } from "../lib.mjs";
+import { run } from "../../lib.mjs";
 
 await run(async ({ page, shot }) => {
   await page.waitForTimeout(1500);
