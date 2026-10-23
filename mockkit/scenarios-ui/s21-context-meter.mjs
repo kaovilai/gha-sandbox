@@ -10,7 +10,19 @@ export default async function ({ page, shot, env }) {
     localStorage.setItem("t3code:client-settings:v1", JSON.stringify({ onboardingCompletedAt: "2026-01-01T00:00:00.000Z", contextWindowMeterEnabled: true }));
   });
   await page.reload({ waitUntil: "load" });
-  await startSession(page, env);
+  // Right after the reload "Add project" can land on Settings > Connections (environment not connected yet, seen in ~2 of 5 CI runs;
+  // the typed path then ends up in the settings search). Retry from the app root, logging each failed attempt.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.waitForTimeout(2500);
+      await startSession(page, env);
+      break;
+    } catch (e) {
+      console.log(`FINDING s21 startSession attempt ${attempt} failed at ${page.url()}: ${String(e.message).split("\n")[0]}`);
+      if (attempt >= 3) throw e;
+      await page.goto(new URL("/", page.url()).href, { waitUntil: "load" });
+    }
+  }
   await sendPrompt(page, "Hello, mock agent");
   await page.getByText(/turn 1/).first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1500);
