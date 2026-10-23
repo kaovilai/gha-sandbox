@@ -159,16 +159,7 @@ export default async function ({ page, shot, env }) {
     if (!ok) throw new Error("assertion failed: the svg <img> has no decoded pixels (naturalWidth 0)");
     await shot("preview-image");
   });
-  // extras: genuine features, kept non-fatal until their selectors are verified on CI
-  const soft = async (n, fn) => {
-    try {
-      await fn();
-    } catch (e) {
-      console.log(`FINDING (non-fatal) ${n}: ${String(e.message).split("\n")[0]}`);
-      await shot(`${n.replace(/\W+/g, "-")}-FAILED`).catch(() => {});
-    }
-  };
-  await soft("tree search", async () => {
+  await step("tree search", async () => {
     const search = page.getByPlaceholder("Search files").first();
     await expectVisible(page, search, "tree 'Search files' input");
     await search.fill("guide");
@@ -180,7 +171,7 @@ export default async function ({ page, shot, env }) {
     await search.fill("");
     await page.waitForTimeout(600);
   });
-  await soft("file picker", async () => {
+  await step("file picker", async () => {
     await page.keyboard.press("Control+P");
     const input = await must(page, page.locator("input:visible").last(), "file picker input");
     await input.fill("logo");

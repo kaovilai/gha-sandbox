@@ -77,6 +77,7 @@ export function maskInit(rules) {
   // <input>/<textarea> values are not text nodes (env var rows in Settings > Providers show absolute paths): rewrite them too, but
   // never the focused one (a driver may be typing a real workspace path into it) and never password fields.
   const fixInputs = () => {
+    if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName ?? "")) return; // someone (a driver) is typing: hands off every field
     for (const e of document.querySelectorAll("input,textarea")) {
       if (e === document.activeElement || e.type === "password") continue;
       const v = e.value;

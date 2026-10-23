@@ -29,13 +29,18 @@ export default async function ({ page, shot, env }) {
   // (the Diff panel renders in shadow DOM: text locators pierce it, body.innerText does not)
   await expectText(page, "src/farewell.ts", "diff panel row src/farewell.ts");
   await expectText(page, "src/greeting.ts", "diff panel row src/greeting.ts");
-  await expectText(page, /Goodbye/, "farewell.ts hunk content ('Goodbye') in the diff");
   // expand the file rows to show the actual hunks (row chevron, not the filename: filename opens the file viewer)
   const chevrons = page.locator("button[aria-label^='Expand'], button[aria-label*='xpand file']");
   console.log(`FINDING expand controls in diff panel: ${await chevrons.count()}`);
   await page.getByRole("button", { name: /Expand all|Toggle diff/i }).first().click().catch(() => {});
   await page.mouse.click(917, 107).catch(() => {}); // chevron of first file row
   await page.waitForTimeout(800);
+  // farewell.ts (new file) now shows its added lines
+  if (!(await page.getByText(/Goodbye/).first().isVisible().catch(() => false))) {
+    await page.getByText("src/farewell.ts", { exact: true }).first().click().catch(() => {});
+    await page.waitForTimeout(800);
+  }
+  await expectText(page, /Goodbye/, "farewell.ts hunk content ('Goodbye') in the diff");
   // greeting.ts is collapsed by default: open it through its row (text pierces the diff's shadow DOM)
   if (!(await page.getByText(/Welcome aboard/).first().isVisible().catch(() => false))) {
     await page.getByText("src/greeting.ts", { exact: true }).first().click().catch(() => {});
