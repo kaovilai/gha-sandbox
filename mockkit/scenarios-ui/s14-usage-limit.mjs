@@ -4,8 +4,9 @@ import { ask, composerEditor, dumpPage, providerOf, sendPrompt, startSession } f
 import { pickInstance, seedUpstreamGrok } from "../lib/ui-extra.mjs";
 
 export default async function ({ page, shot, env }) {
-  if (providerOf(env) === "codex") {
+  if (providerOf(env) === "codex" || providerOf(env) === "claude") {
     // Codex flavor: the mock fails the turn with codexErrorInfo usageLimitExceeded + account/rateLimits/updated (scenario usage-limit).
+    // Claude flavor: rate_limit_event (rejected) + assistant error "rate_limit" + is_error result -> T3 usage_limit failure.
     await startSession(page, env);
     await shot("ready");
     await ask(page, env, "usage-limit", "Please keep working on the migration.");
@@ -13,12 +14,12 @@ export default async function ({ page, shot, env }) {
     try {
       await banner.waitFor({ state: "visible", timeout: 60_000 });
     } catch (e) {
-      await dumpPage(page, "s14 codex: no usage-limit UI");
+      await dumpPage(page, `s14 ${providerOf(env)}: no usage-limit UI`);
       throw e;
     }
     await page.waitForTimeout(2000);
     await shot("usage-limit");
-    await dumpPage(page, "s14 codex usage limit");
+    await dumpPage(page, `s14 ${providerOf(env)} usage limit`);
     return;
   }
   seedUpstreamGrok(env, "grok_usage", "Upstream (usage limit)", { T3_ACP_EMIT_XAI_RATE_LIMIT_THEN_HANG: "1" });

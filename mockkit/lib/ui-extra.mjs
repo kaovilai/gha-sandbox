@@ -27,7 +27,7 @@ export function seedInstances(env, instances) {
       ...(o.displayName ? { displayName: o.displayName } : {}),
       ...(o.accentColor ? { accentColor: o.accentColor } : {}),
       enabled: o.enabled ?? true,
-      environment: Object.entries({ ...base, MOCK_CLI_MODE: o.mode ?? "ready", ...(o.driver === "codex" ? { MOCK_CLI_FLAVOR: "codex" } : {}), ...(o.env ?? {}) }).map(([name, value]) => ({ name, value: String(value) })),
+      environment: Object.entries({ ...base, MOCK_CLI_MODE: o.mode ?? "ready", ...(o.driver === "codex" ? { MOCK_CLI_FLAVOR: "codex" } : o.driver === "claudeAgent" ? { MOCK_CLI_FLAVOR: "claude" } : {}), ...(o.env ?? {}) }).map(([name, value]) => ({ name, value: String(value) })),
       config: { binaryPath: o.binaryPath ?? LAUNCHER },
     };
   }

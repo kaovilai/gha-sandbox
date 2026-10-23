@@ -71,8 +71,8 @@ export async function addProject(page, wsPath, { shot } = {}) {
   return name;
 }
 
-// Which mock provider a driver runs against: env.MOCKKIT_PROVIDER = grok (default) | codex (set per scenario by scenario.mjs).
-export const providerOf = (env) => (env?.MOCKKIT_PROVIDER === "codex" ? "codex" : "grok");
+// Which mock provider a driver runs against: env.MOCKKIT_PROVIDER = grok (default) | codex | claude (set per scenario by scenario.mjs).
+export const providerOf = (env) => (env?.MOCKKIT_PROVIDER === "codex" ? "codex" : env?.MOCKKIT_PROVIDER === "claude" ? "claude" : "grok");
 
 // Start a fresh thread in the project and make sure the composer targets the mock model. Polls until the mock
 // provider is selectable (READY); fails loudly when it never shows up. provider "codex" = the Codex-driver mock
@@ -81,8 +81,9 @@ export async function newMockThread(page, { project, shot, provider = "grok" } =
   await page.getByRole("button", { name: `New thread in ${project}` }).first().click();
   await composerEditor(page).waitFor({ state: "visible", timeout: 30_000 });
   const codex = provider === "codex";
-  const wantLabel = codex ? /gpt-6-astra|gpt-6-luna|gpt-5\.6-sol/i : /Mock/i;
-  const pickerLoc = () => page.locator("button").filter({ hasText: /Mock (Build|Fast)|gpt-|claude|opus|sonnet|grok/i }).last();
+  const claude = provider === "claude"; // Claude-driver mock: T3's own Claude model names (Opus / Sonnet / Haiku 5.x), rail icon "Claude"
+  const wantLabel = codex ? /gpt-6-astra|gpt-6-luna|gpt-5\.6-sol/i : claude ? /Claude|Fable|Opus|Sonnet|Haiku/i : /Mock/i;
+  const pickerLoc = () => page.locator("button").filter({ hasText: /Mock (Build|Fast)|gpt-|claude|opus|sonnet|haiku|fable|grok/i }).last();
   const deadline = Date.now() + 90_000;
   let label = "";
   while (Date.now() < deadline) {
@@ -93,12 +94,12 @@ export async function newMockThread(page, { project, shot, provider = "grok" } =
     }
     if (label) {
       await pickerLoc().click().catch(() => {});
-      if (codex) {
+      if (codex || claude) {
         // provider rail: one icon button per instance (aria-label = display name)
-        const rail = page.getByRole("button", { name: /^Codex$/i }).first();
+        const rail = page.getByRole("button", { name: codex ? /^Codex$/i : /^Claude$/i }).first();
         if (await rail.isVisible({ timeout: 1500 }).catch(() => false)) await rail.click().catch(() => {});
       }
-      const opt = codex ? page.getByText(/GPT-6-Astra/i).last() : page.getByText("Mock Build", { exact: false }).first();
+      const opt = codex ? page.getByText(/GPT-6-Astra/i).last() : claude ? page.getByText(/Sonnet 5\.5/i).last() : page.getByText("Mock Build", { exact: false }).first();
       if (await opt.isVisible({ timeout: 1500 }).catch(() => false)) {
         await shot?.("model-picker");
         await opt.click();

@@ -23,12 +23,13 @@ const packs = JSON.parse(readFileSync(join(here, "../../mockkit/packs.json"), "u
 // Provider per scenario: token suffix "@codex" / "@grok" (s03@codex), pack name starting with "codex" (packs.json "codex"),
 // or env MOCK_PROVIDER=codex|grok for everything; default grok. A driver may export
 // `meta.seed = { codex: "both" }` to seed more providers than it runs against (e.g. the model-picker driver).
-const labelOf = (e) => (e.prov === "codex" ? `codex-${e.id}` : e.id);
+// Claude flavor: "@claude" suffix (s03@claude), pack name starting with "claude" (packs.json "claude"), or MOCK_PROVIDER=claude; runs are named "claude-<driver>".
+const labelOf = (e) => (e.prov === "codex" ? `codex-${e.id}` : e.prov === "claude" ? `claude-${e.id}` : e.id);
 function resolveIds(spec) {
   const out = new Map();
   for (const raw of spec.split(",").map((s) => s.trim()).filter(Boolean)) {
     const [tok, atProv] = raw.split("@");
-    const prov = atProv || (/^codex/.test(tok) ? "codex" : process.env.MOCK_PROVIDER === "codex" ? "codex" : "grok");
+    const prov = atProv || (/^codex/.test(tok) ? "codex" : /^claude/.test(tok) ? "claude" : process.env.MOCK_PROVIDER === "codex" ? "codex" : process.env.MOCK_PROVIDER === "claude" ? "claude" : "grok");
     const list = packs[tok] ? (packs[tok] === "*" ? drivers : packs[tok]) : [tok];
     for (const t of list) {
       const hit = drivers.includes(t) ? [t] : drivers.filter((d) => d.startsWith(`${t}-`));
