@@ -31,7 +31,8 @@ and makes the mock the default model). `MOCK_KEEP_OTHER_PROVIDERS=1` keeps them.
 | `packs.json` | scenario packs for `SCENARIOS` (`web`, `smoke`, `explore`, `all`) |
 | `lib/log.mjs` | NDJSON log of every frame in/out and every step to `$MOCK_LOG` |
 | `adapters/acp.mjs` | ACP agent: initialize, authenticate, session/new\|load\|resume\|close, set_model, set_config_option, prompt, cancel, request_permission, `_x.ai/ask_user_question` |
-| `bin/t3-mock-acp.mjs`, `bin/mock-cli.sh` | entrypoint; fake grok launcher (`--version`, `models`, `inspect --json`, `agent stdio`) |
+| `bin/t3-mock-acp.mjs`, `bin/mock-cli.sh` | entrypoint; fake grok launcher (`--version`, `models`, `inspect --json`, `agent stdio`); also routes the Codex flavor (below) |
+| `adapters/codex.mjs`, `bin/t3-mock-codex.mjs`, `lib/textgen.mjs` | Codex app-server + `exec` text generation on the same IR (section "Codex adapter") |
 | `seed/settings.mjs`, `seed/workspace.sh` | write `settings.json` (+ `client-settings.json`) and create the demo workspace repo |
 | `scenarios/*.mjs` | mock scripts: echo, markdown-stream, think, tool-read, edit-file-diff, approval-allow, error-turn, shell, slow, ask, plan |
 | `scenarios-ui/<id>.mjs` | Playwright drivers (`export default async ({page, shot, env}) => ...`) |
@@ -106,7 +107,7 @@ become the scenario's `title`, so the sidebar reads "Failing turn", "Approval re
 
 `MOCK_LOG` (NDJSON), `MOCK_PACE` (fast/real/slow), `MOCK_SEED`, `MOCK_DEFAULT_SCENARIO`, `MOCK_CONTROL_DIR`,
 `MOCK_HOLD_TIMEOUT_MS`, `MOCK_CLI_MODE` (ready/unauth/old/broken/missing, launcher probe output),
-`MOCK_KEEP_OTHER_PROVIDERS`, `MOCK_NODE`. Baseline no-cloud env set by `lib/boot.mjs`: `T3CODE_TELEMETRY_ENABLED=false
+`MOCK_KEEP_OTHER_PROVIDERS`, `MOCK_NODE`, `MOCK_PROVIDER` (grok|codex|both), `MOCK_CLI_FLAVOR` (codex), `MOCK_CODEX_ACCOUNT` (apiKey|chatgpt). Baseline no-cloud env set by `lib/boot.mjs`: `T3CODE_TELEMETRY_ENABLED=false
 T3CODE_OTEL_SDK_DISABLED=true T3CODE_NO_BROWSER=1 T3CODE_DISABLE_AUTO_UPDATE=true`.
 
 ## Findings (verified in CI)
@@ -183,9 +184,51 @@ card is absent after the first wait;
 (c) approval buttons are `Cancel`, `Decline`, `Allow all edits this session`, `Approve` (not "Allow once"); (d) assistant markdown text
 nodes are sometimes absent from the accessibility tree, so final-state checks also read the server.
 
+## Codex adapter
+
+A second protocol flavor on the same scenario IR: T3's `codex` driver shows the Codex-branded provider (OpenAI icon, "GPT-6-Astra" model picker,
+reasoning-effort picker, Settings > Providers card "Authenticated · OpenAI API Key"), fully keyless.
+
+```
+T3 codex driver ──spawns──▶ <binaryPath> app-server      = mockkit/bin/mock-cli.sh (MOCK_CLI_FLAVOR=codex, or argv app-server|exec|mcp)
+                                   │                              └─▶ bin/t3-mock-codex.mjs ──▶ adapters/codex.mjs (newline-delimited JSON-RPC)
+text generation ──spawns──▶ <binaryPath> exec ... --output-schema S --output-last-message F -    (also `mcp list --json`, `--version`)
+```
+
+Frame shapes come from the upstream recorded transcripts (`orchestration-v2/testkit/fixtures/*/codex_transcript.ndjson`) and the generated schema
+(`packages/effect-codex-app-server/src/_generated/schema.gen.ts`); `setupMode: "managed"` is never set (it downloads the real CLI).
+
+* **Provider selection.** `MOCK_PROVIDER=grok|codex|both` (read by `seed/settings.mjs`; default `grok` = unchanged behaviour). `codex` writes
+  `providerInstances.codex` enabled (`config.binaryPath` = the launcher, env `MOCK_CLI_FLAVOR=codex`), disables grok/claude, and points
+  `textGenerationModelSelection` at `codex`/`gpt-6-luna`. `both` keeps Grok READY too. `MOCK_CLI_MODE=unauth|old|broken|missing` varies the probe;
+  `MOCK_CODEX_ACCOUNT=chatgpt` switches the account from `apiKey` (default) to a ChatGPT Plus account (the mock then writes `CODEX_HOME/models_cache.json`; not exercised in CI).
+* **Driver selection in CI.** `scenarios=codex` (pack, 17 drivers) or `s03@codex,s08@codex` (`@codex` suffix per token) or env `MOCK_PROVIDER=codex`. Codex runs
+  are named `codex-<driver>` (`after-codex-s03-markdown-stream-done.png`) so they sit next to Grok runs. A driver may export `meta.seed = { codex: "both" }`
+  to seed more providers than it runs against (s20). Drivers read `env.MOCKKIT_PROVIDER` (`providerOf(env)` in `lib/ui.mjs`); `startSession` picks the Codex model.
+* **Probe.** `initialize` (userAgent `t3code_desktop/0.159.0 ...`, >= recommended so no compatibility banner; a second `initialize` answers -32600 "Already initialized"
+  like codex), `account/read` -> `{type:"apiKey"}` (a `chatgpt` account makes T3 wait for `models_cache.json`), `skills/list`, `model/list` (gpt-6-astra default, gpt-6-luna,
+  gpt-5.6-sol; low/medium/high reasoning), `config/read`, `account/rateLimits/read`.
+* **Turns.** `thread/start|resume|read|fork|turns/list|compact/start|unsubscribe`, `turn/start|interrupt|steer`. Thread state (turn count, history) is persisted under
+  `$MOCK_CONTROL_DIR/codex-threads/` so `thread/resume` after a respawn keeps counting. IR mapping: `say` -> `agentMessage` + deltas, `think` -> `reasoning` summary deltas,
+  `sh` -> `commandExecution` (REAL `sh -c`, stdout via `outputDelta`, exit code), `read` -> `commandExecution` with a `read` command action, `fsWrite` -> `fileChange`
+  (REAL write; add = content, update = single-hunk unified diff) so the Changes panel works, generic `tool` -> `mcpToolCall`, `plan` -> `turn/plan/updated`,
+  `exitPlan` -> `plan` item + deltas, `permission` -> `item/fileChange|commandExecution/requestApproval` (accept/acceptForSession -> run, decline -> `declined` item +
+  `onReject`, cancel -> interrupted turn), `ask` -> `item/tool/requestUserInput`, `error` -> `error` notification + failed turn (`kind:"usage_limit"` ->
+  `usageLimitExceeded` after an `account/rateLimits/updated` with a 100% window), `hold` gates and the hidden `mockctl next` queue work unchanged.
+  `thread/tokenUsage/updated` follows each turn (context window 258400; queue/tag arg `tokens=<n>` forces the input size, used by S21 to fill the meter).
+* **Approvals follow Codex semantics:** with `approvalPolicy: "never"` (T3 "Full access") the mock never asks and the action just runs; approval drivers switch to "Supervised".
+* **Text generation.** `exec` reads the prompt from stdin and writes JSON for the keys named in the `--output-schema` file to `--output-last-message` (shared `lib/textgen.mjs`).
+  S24 shows the commit subject "Update files via mock agent" coming from it. Any other request gets JSON-RPC -32601 instead of hanging.
+* **Limits (honest).** Model names look like real Codex models (`gpt-6-astra`...) but every answer is scripted; the picker shows "Legacy models" for gpt-5.6-sol (T3 grouping).
+  No `item/permissions/requestApproval`, MCP elicitation, subagent (`collabAgentToolCall`) or goal frames are produced; `thread/goal/*` just answers empty and
+  `thread/revert` is unhandled (-32601). `thread/compact/start` runs a bare `contextCompaction` turn. Agent messages are all `phase:"final_answer"` (no `commentary` phase).
+  The file-change approval card shows the absolute runner path of the file (Codex sends absolute paths). Switching provider mid-thread (S20) leaks T3's handoff prompt into the
+  echo answer, same as Grok. Sidebar thread titles come from the prompt text, not the scenario title (hidden routing has no tag). Real `codex` behaviour that depends on a
+  model (planning, tool choice) is not simulated.
+
 ## Known limits
 
-* Only the ACP flavor (grok) is implemented. Codex / pi / claude / opencode adapters and mobile/desktop are not built.
+* ACP (grok) and Codex (`app-server`) flavors are implemented. pi / claude / opencode adapters are not built (see "Codex adapter" for Codex limits).
 * Standard ACP `plan` renders as a todo list; a ProposedPlanCard comes from the xAI `exit_plan_mode` request (IR step `exitPlan`, scenario `exit-plan`, S11b).
 * The `acpRegistry` driver does not map upstream xAI rate-limit frames; use the grok driver (`MOCK_UPSTREAM_AGENT`) for S14.
 * T3 (web) does not render streamed stdout of an in-progress command: the row reads "Running command" and is not expandable until the
