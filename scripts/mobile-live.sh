@@ -166,6 +166,9 @@ start_thread() { # <title> <prompt> -> threadId
   return 1
 }
 next() { node "$kit/ctl/mockctl.mjs" next "$@" --cwd "$ws"; }
+# gate/hold names (g40, live40, g41) are reused by every pass: a release file left by an earlier pass (grok, in `both` mode) would let the
+# next pass's turn run straight through its gate (codex-s40 then completes before the app opens the thread). Clear before each gated scenario.
+clear_gates() { rm -rf "$MOCK_CONTROL_DIR/release" "$MOCK_CONTROL_DIR/reached"; }
 # wait_server <threadId> <regex> <timeoutSec>: poll `thread show --json` until the assistant text matches
 wait_server() {
   local t0=$SECONDS j
@@ -223,6 +226,7 @@ sleep 3
 # ---- scenarios ----------------------------------------------------------------------------------------------------
 run_s40() {
   local title="$TP live stream" tid
+  clear_gates
   next live-stream gate=g40 hold=live40
   rec_start s40
   tid=$(start_thread "$title" "Stream me a progress report.") || { rec_stop s40; return 1; }
@@ -270,6 +274,7 @@ run_s40() {
 run_s41() {
   local title="$TP approval" tid
   rm -f "$ws/NOTES.md"
+  clear_gates
   next live-approval gate=g41
   rec_start s41
   tid=$(start_thread "$title" "Please write a notes file.") || { rec_stop s41; return 1; }
