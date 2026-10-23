@@ -9,5 +9,9 @@ export default async function ({ page, shot, env }) {
   await shot("collapsed");
   await expandWork(page);
   await shot("expanded");
+  // open the grouped tool row ("Read 2 files and searched code 1 time") to list the individual calls
+  await page.getByRole("button", { name: /Read 2 files/ }).first().click().catch(() => {});
+  await page.waitForTimeout(1000);
+  await shot("tools");
   await dumpPage(page, "s05");
 }

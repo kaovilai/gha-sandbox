@@ -16,8 +16,7 @@ export default async function ({ page, shot, env }) {
   await page.getByText(/Strict \(Recommended\)/).first().click();
   await page.waitForTimeout(600);
   await shot("selected");
-  const submit = page.getByRole("button", { name: /submit|send|continue|answer/i }).last();
-  if (await submit.isVisible().catch(() => false)) await submit.click();
+  await page.getByRole("button", { name: "Submit", exact: true }).click();
   await page.getByText(/going with/).first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1000);
   await shot("answered");

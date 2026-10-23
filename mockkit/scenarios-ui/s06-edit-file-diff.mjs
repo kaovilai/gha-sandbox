@@ -16,8 +16,11 @@ export default async function ({ page, shot, env }) {
   await changes.click();
   await page.waitForTimeout(2000);
   await shot("diff-panel");
-  // expand the modified file to show the actual hunk
-  await page.getByText("src/greeting.ts").last().click().catch(() => {});
+  // expand the file rows to show the actual hunks (row chevron, not the filename: filename opens the file viewer)
+  const chevrons = page.locator("button[aria-label^='Expand'], button[aria-label*='xpand file']");
+  console.log(`FINDING expand controls in diff panel: ${await chevrons.count()}`);
+  await page.getByRole("button", { name: /Expand all|Toggle diff/i }).first().click().catch(() => {});
+  await page.mouse.click(917, 107).catch(() => {}); // chevron of first file row
   await page.waitForTimeout(1500);
   await shot("diff-expanded");
   const info = await dumpPage(page, "s06 diff panel");

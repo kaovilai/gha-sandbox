@@ -10,6 +10,9 @@ export default async function ({ page, shot, env }) {
   await page.getByText(/finished successfully/).first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1000);
   await expandWork(page);
+  // open the command row to show the streamed output
+  await page.getByText(/while \[/).first().click().catch(() => {});
+  await page.waitForTimeout(1000);
   await shot("done");
   await dumpPage(page, "s07 done");
 }

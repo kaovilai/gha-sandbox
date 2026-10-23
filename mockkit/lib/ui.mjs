@@ -102,7 +102,8 @@ export async function expandWork(page) {
 
 // Switch the composer runtime mode (default "Full access" auto-approves everything, so no prompts).
 export async function setRuntimeMode(page, labelRe, { shot } = {}) {
-  await page.getByRole("button", { name: "Runtime mode" }).first().click();
+  // The aria-label only exists once the thread has messages, so match on the visible mode text.
+  await page.locator("button").filter({ hasText: /^\s*(Full access|Supervised|Auto[- ]?accept.*|Auto)\s*$/i }).last().click();
   await page.waitForTimeout(500);
   await shot?.("runtime-mode-menu");
   await dumpPage(page, "runtime mode menu");
@@ -111,7 +112,7 @@ export async function setRuntimeMode(page, labelRe, { shot } = {}) {
     .or(page.getByRole("menuitem", { name: labelRe }))
     .or(page.getByRole("option", { name: labelRe }))
     .or(page.getByText(labelRe))
-    .first()
+    .last() // the popup is portaled to the end of the DOM
     .click();
   await page.waitForTimeout(500);
 }
