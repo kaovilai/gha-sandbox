@@ -489,7 +489,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
       if (error.codexErrorInfo === "usageLimitExceeded") {
         // Rate limits first (and a beat to be processed): T3 reads the reset time from the latest snapshot when it terminalizes the turn.
         notify("account/rateLimits/updated", {
-          rateLimits: { limitId: "codex", limitName: null, planType: "plus", primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: nowSec() + 3 * 3600 }, secondary: { usedPercent: 62, windowDurationMins: 10080, resetsAt: nowSec() + 4 * 86400 }, rateLimitReachedType: "primary" },
+          rateLimits: { limitId: "codex", limitName: null, planType: "plus", primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: nowSec() + 3 * 3600 }, secondary: { usedPercent: 62, windowDurationMins: 10080, resetsAt: nowSec() + 4 * 86400 }, rateLimitReachedType: "rate_limit_reached" },
         });
         await new Promise((r) => setTimeout(r, 300));
       }

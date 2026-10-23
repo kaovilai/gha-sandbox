@@ -320,6 +320,7 @@ test("error-turn: error notification then failed turn; usage-limit maps to usage
   const rl = c.frames.find((f) => f.method === "account/rateLimits/updated").params.rateLimits;
   assert.equal(rl.primary.usedPercent, 100);
   assert.equal(rl.limitId, "codex");
+  assert.equal(rl.rateLimitReachedType, "rate_limit_reached"); // schema enum (a wrong literal fails T3's decode and drops the reset time)
   c.close();
 });
 
