@@ -354,6 +354,45 @@ test("chatgpt account: plan, models_cache.json, account id + reset credits in ra
   k.close();
 });
 
+test("mcp-app: mcpToolCall carries mcpAppUi.resourceUri; mcpServer/resource/read serves the HTML with the mcp-app mime type", async () => {
+  const c = client();
+  await boot(c);
+  const threadId = await startThread(c);
+  await c.request("turn/start", turnParams(threadId, c.cwd, "[mock:mcp-app] go", "never"));
+  await c.note("turn/completed");
+  const done = c.frames.find((f) => f.method === "item/completed" && f.params.item.type === "mcpToolCall").params.item;
+  assert.equal(done.status, "completed");
+  assert.equal(done.server, "linear");
+  assert.equal(done.tool, "issue_board");
+  assert.equal(done.mcpAppUi.resourceUri, "ui://linear/issue_board.html");
+  assert.equal(done.mcpAppUi.preferredModelDisplayMode, "inline");
+  assert.deepEqual(done.result.content, [{ type: "text", text: "3 issues (2 open)" }]);
+  const res = await c.request("mcpServer/resource/read", { threadId, server: "linear", uri: done.mcpAppUi.resourceUri });
+  assert.equal(res.result.contents[0].mimeType, "text/html;profile=mcp-app");
+  assert.match(res.result.contents[0].text, /MOCK-12/);
+  assert.equal((await c.request("mcpServer/resource/read", { threadId, server: "linear", uri: "ui://nope" })).error.code, -32602);
+  assert.equal((await c.request("mcpServer/tool/call", { threadId, server: "linear", tool: "x", arguments: {} })).result.isError, false);
+  c.close();
+});
+
+test("subagent-approval: the child's approval request carries the child thread + turn ids", async () => {
+  const c = client();
+  await boot(c);
+  const threadId = await startThread(c);
+  await c.request("turn/start", turnParams(threadId, c.cwd, "[mock:subagent-approval] go"));
+  const req = await c.waitFor((f) => f.method === "item/fileChange/requestApproval");
+  assert.notEqual(req.params.threadId, threadId, "request belongs to the child thread");
+  const childStarted = c.frames.find((f) => f.method === "turn/started" && f.params.threadId === req.params.threadId);
+  assert.equal(childStarted.params.turn.id, req.params.turnId);
+  assert.ok(!existsSync(join(c.cwd, "NOTES.md")));
+  c.send({ id: req.id, result: { decision: "accept" } });
+  const done = await c.note("turn/completed", (p) => p.threadId === threadId);
+  assert.equal(done.params.turn.status, "completed");
+  assert.ok(existsSync(join(c.cwd, "NOTES.md")));
+  assert.match(agentText(c.frames, threadId), /writer subagent finished/);
+  c.close();
+});
+
 // ---- provider-neutral IR: ACP-style sinks without the Codex ops degrade ---------------------------------
 const quietCtx = () => ({ cwd: tmpdir(), env: {}, signal: undefined, pace: { chunkWords: 5, chunkMs: () => 0, toolMs: 0 }, log: () => {}, answers: {}, nextToolId: (() => { let n = 0; return () => `t${++n}`; })() });
 function recordingSink(decision = "allow") {

@@ -142,6 +142,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
   let nextTool = 0;
   let nextItem = 0;
   let nextProc = 4000;
+  const mcpResources = new Map(); // ui:// uri -> html, served by mcpServer/resource/read
   const resetCredits = { available: Number(env.MOCK_CODEX_RESET_CREDITS ?? 2) };
   const stateDir = join(controlDir({ ...process.env, ...env }), "codex-threads");
 
@@ -527,6 +528,18 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         await sleep(pace.toolMs, signal);
         emitDone(x.url ? { ...item, action: { type: "openPage", url: x.url } } : item);
       },
+      // MCP app: a completed mcpToolCall that points at a ui:// resource; T3 then calls mcpServer/resource/read for the HTML
+      // and renders it in a sandboxed frame inside the timeline.
+      async mcpApp(x) {
+        closeOpen();
+        const uri = x.uri ?? `ui://${x.server}/${x.name}.html`;
+        mcpResources.set(uri, x.html);
+        const base = { type: "mcpToolCall", id: x.id, server: x.server, tool: x.name, arguments: x.input ?? {}, result: null, error: null, durationMs: null, mcpAppUi: { resourceUri: uri, preferredModelDisplayMode: "inline" }, mcpAppResourceUri: uri };
+        const t0 = Date.now();
+        emitStart({ ...base, status: "inProgress" });
+        await sleep(pace.toolMs, signal);
+        emitDone({ ...base, status: "completed", durationMs: Date.now() - t0, result: { content: [{ type: "text", text: x.output ?? "ok" }] } });
+      },
       retry(r) {
         notify("error", { threadId: t.id, turnId, willRetry: true, error: { message: r.message ?? `Reconnecting... ${r.attempt}/${r.max}`, codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } }, additionalDetails: null } });
       },
@@ -833,6 +846,13 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         return reply(id, { data: [] });
       case "mcpServerStatus/list":
         return reply(id, { data: [], nextCursor: null });
+      case "mcpServer/resource/read": {
+        const html = mcpResources.get(params.uri);
+        if (html === undefined) return fail(id, -32602, `Unknown resource ${params.uri}`);
+        return reply(id, { contents: [{ uri: params.uri, mimeType: "text/html;profile=mcp-app", text: html }] });
+      }
+      case "mcpServer/tool/call":
+        return reply(id, { content: [{ type: "text", text: "ok (mock MCP tool)" }], isError: false });
       default:
         return fail(id, -32601, `Unhandled request: ${method}`);
     }

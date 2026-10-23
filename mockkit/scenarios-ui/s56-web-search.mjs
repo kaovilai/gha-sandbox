@@ -10,6 +10,11 @@ export default async function ({ page, shot, env }) {
   await shot("answer");
   await expandWork(page);
   await expandRows(page, { type: "web" });
+  const searched = page.getByText(/Searched the web/).first();
+  if (await searched.isVisible().catch(() => false)) {
+    await searched.click().catch(() => {});
+    await page.waitForTimeout(800);
+  }
   await page.waitForTimeout(800);
   const info = await dumpPage(page, "s56 web search");
   console.log(`FINDING web search row: query=${/vite 8 config options/i.test(info.text)} commentary text=${/look that up/.test(info.text)}`);

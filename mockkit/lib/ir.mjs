@@ -25,6 +25,8 @@
 //                                        degrade: one tool call, child text becomes its output
 //   {goal:{status?,tokensUsed?,timeUsedSeconds?}}   update the thread goal set by `/goal` (Codex thread/goal/*); degrade: no-op
 //   {web:{query,url?}}                   web search (Codex webSearch item); degrade: a fetch-kind tool call
+//   {mcpApp:{server,name,title?,html,input?,output?}}  MCP tool call whose result is an interactive HTML app (Codex mcpToolCall +
+//                                        mcpAppUi + mcpServer/resource/read); degrade: a plain tool call
 //   {retry:{message,attempt,max}}        transient provider retry notice (Codex error willRetry:true); degrade: no-op
 //   say takes `phase:"commentary"` (Codex agentMessage phase); ignored elsewhere.
 //
@@ -64,6 +66,7 @@ export const S = {
   grant: (o) => ({ grant: o }),
   subagent: (o) => ({ subagent: o }),
   goal: (o = {}) => ({ goal: o }),
+  mcpApp: (o) => ({ mcpApp: o }),
   web: (query, o = {}) => ({ web: { query, ...o } }),
   retry: (message, attempt = 1, max = 5) => ({ retry: { message, attempt, max } }),
 };
@@ -238,6 +241,16 @@ export async function runSteps(stepsIn, sink, ctx) {
         const quiet = { message: (t) => (text += t), thought() {}, toolStart() {}, toolUpdate() {}, plan() {}, permission: async () => "allow", ask: async () => ({ answers: {} }), exitPlan: async () => ({}) };
         await runSteps(a.steps ?? [], quiet, ctx);
         sink.toolUpdate({ id, status: "completed", text: a.result ?? text, output: a.result ?? text });
+        break;
+      }
+      case "mcpApp": {
+        const id = ctx.nextToolId();
+        await sleep(pace.toolMs, signal);
+        if (sink.mcpApp) {
+          await sink.mcpApp({ id, ...a });
+          break;
+        }
+        await runSteps([{ tool: { kind: "other", title: a.title ?? `${a.server}.${a.name}`, input: a.input, output: a.output ?? "(interactive MCP app, not rendered by this provider)" } }], sink, ctx);
         break;
       }
       case "goal":

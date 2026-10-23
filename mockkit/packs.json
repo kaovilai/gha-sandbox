@@ -71,7 +71,9 @@
     "s54-thread-revert",
     "s55-chatgpt-account",
     "s56-web-search",
-    "s57-provider-retry"
+    "s57-provider-retry",
+    "s58-mcp-app",
+    "s59-subagent-approval"
   ],
   "explore": [
     "s00-explore"

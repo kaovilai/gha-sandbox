@@ -21,8 +21,22 @@ export default async function ({ page, shot, env }) {
   const done = await dumpPage(page, "s52 finished");
   console.log(`FINDING after finish: explorer=${/explorer/i.test(done.text)} builder=${/builder/i.test(done.text)} result text shown=${/not called anywhere else/.test(done.text)}`);
   await shot("finished");
-  // open the child thread (subagent row link / sidebar child thread)
-  const open = page.getByRole("button", { name: /Open (child )?thread|View (child )?thread|explorer/i }).first();
+  // expand the "N subagents" summary row, then open the lineage list / a child thread
+  const summary = page.getByText(/\d+ subagents?/).first();
+  if (await summary.isVisible().catch(() => false)) {
+    await summary.click().catch(() => {});
+    await page.waitForTimeout(1500);
+    await shot("subagents-expanded");
+    await dumpPage(page, "s52 subagents expanded");
+  }
+  const prev = page.getByText(/Previous agents/).first();
+  if (await prev.isVisible().catch(() => false)) {
+    await prev.click().catch(() => {});
+    await page.waitForTimeout(1200);
+    await shot("lineage-previous-agents");
+  }
+  // open the child thread (subagent row link / lineage entry)
+  const open = page.getByText(/Find where greet\(\)|Check the build script/).first();
   if (await open.isVisible().catch(() => false)) {
     await open.click().catch(() => {});
     await page.waitForTimeout(2500);

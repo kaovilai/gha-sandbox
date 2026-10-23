@@ -25,6 +25,15 @@ export default async function ({ page, shot, env }) {
   const lim = await dumpPage(page, "s55 usage limits");
   console.log(`FINDING usage-limits banner: title=${/Usage limits/.test(lim.text)} session=${/Session/.test(lim.text)} weekly=${/Weekly/.test(lim.text)} reset-credit=${/credit/i.test(lim.text)}`);
   await shot("usage-limits");
+  // redeem the banked reset credit: account/rateLimitResetCredit/consume -> outcome "reset", the banner refreshes
+  const useReset = page.getByRole("button", { name: /Use reset/ }).first();
+  if (await useReset.isVisible().catch(() => false)) {
+    await useReset.click();
+    await page.waitForTimeout(3500);
+    const after = await dumpPage(page, "s55 after Use reset");
+    console.log(`FINDING after Use reset: credit-text=${JSON.stringify(after.text.match(/[^\n]*reset credit[^\n]*/i)?.[0] ?? null)} useResetStillThere=${/Use reset/.test(after.text)}`);
+    await shot("usage-limits-after-reset");
+  }
   await gotoPath(page, "/settings/providers");
   await must(page, page.getByText(/ChatGPT Pro/), "ChatGPT plan label on the Codex provider card", 30_000);
   await page.waitForTimeout(3000);

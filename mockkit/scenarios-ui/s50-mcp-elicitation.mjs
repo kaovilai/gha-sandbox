@@ -14,6 +14,17 @@ export default async function ({ page, shot, env }) {
   const info = await dumpPage(page, "s50 pending");
   console.log(`FINDING app-access card: ${/App access approval/.test(info.text)} connector name shown: ${/Linear/.test(info.text)} persist options: ${JSON.stringify(["Always allow", "this session", "Decline", "Cancel"].filter((t) => info.text.includes(t)))}`);
   await shot("pending");
+  // the card's overflow menu (the "..." button after Approve) carries Cancel + the persistence choices from _meta.persist
+  const more = page.getByRole("button", { name: /^Approve$/ }).first().locator("xpath=following::button[1]");
+  if (await more.isVisible().catch(() => false)) {
+    await more.click().catch(() => {});
+    await page.waitForTimeout(800);
+    const menu = await dumpPage(page, "s50 overflow menu");
+    console.log(`FINDING overflow menu: session=${/this session/i.test(menu.text)} always=${/Always allow/.test(menu.text)} cancel=${/Cancel/.test(menu.text)}`);
+    await shot("pending-more-options");
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(500);
+  }
   await page.getByRole("button", { name: /^Approve$/ }).first().click();
   await page.getByText(/Found 2 open bugs/).first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1500);

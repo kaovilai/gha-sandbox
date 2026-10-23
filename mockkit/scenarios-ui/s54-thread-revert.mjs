@@ -1,7 +1,7 @@
 // S54 thread revert / rollback (Codex thread/turns/list + thread/revert): three turns, the second one writes files
 // (edit-file-diff). Hover the third user message, click "Edit from here" (Undo), confirm in the dialog (with and without
 // restoring files). T3 asks the provider to roll the conversation back; the mock drops the turns and the timeline follows.
-import { ask, dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
+import { ask, composerEditor, dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
 import { must } from "../lib/ui-extra.mjs";
 
 export default async function ({ page, shot, env }) {
@@ -36,10 +36,27 @@ export default async function ({ page, shot, env }) {
   await shot("after-revert");
   const after = await dumpPage(page, "s54 after revert");
   console.log(`FINDING after: turn3 gone=${!/Mock agent, turn 3/.test(after.text)} turn2-still-there=${/Open the diff panel/.test(after.text)}`);
-  // continue the thread: the mock restarts counting from the reverted history (turn 3 again)
+  // continue the thread: the mock restarts counting from the reverted history (turn 3 again). The reverted prompt was put
+  // back into the composer, so clear it first.
+  await composerEditor(page).click();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.press("Delete");
   await ask(page, env, "echo", "Fresh message after the revert.");
   await page.getByText(/Fresh message after the revert/).first().waitFor({ timeout: 60_000 });
   await page.getByText(/turn 3/).first().waitFor({ timeout: 60_000 }).catch(() => console.log("FINDING: no 'turn 3' after revert (history not rolled back?)"));
   await page.waitForTimeout(1500);
   await shot("continued");
+  // second revert, this time "Revert files too" on the edit turn: the Changes counter drops back to +0 -0 and src/ is restored
+  const secondMsg = page.getByText("Update the greeting helper.").first();
+  await secondMsg.hover();
+  await page.waitForTimeout(600);
+  await page.getByRole("button", { name: "Edit from here" }).nth(1).click();
+  await page.waitForTimeout(1200);
+  await shot("confirm-dialog-revert-files");
+  await page.getByRole("button", { name: /^Revert files too$/ }).click();
+  await page.waitForFunction(() => !document.body.innerText.includes("Open the diff panel"), null, { timeout: 60_000 }).catch(() => console.log("FINDING: edit turn still visible after revert-files"));
+  await page.waitForTimeout(3000);
+  await shot("after-revert-files");
+  const fin = await dumpPage(page, "s54 after revert files");
+  console.log(`FINDING after revert files: changes=${JSON.stringify(fin.text.match(/Changes\s*\+\d+\s*-\d+/)?.[0] ?? null)} editTurnGone=${!/Open the diff panel/.test(fin.text)}`);
 }
