@@ -36,6 +36,11 @@ export default async function ({ page, shot, env }) {
   await gotoPath(page, "/settings/providers");
   await must(page, page.getByText(claude ? "Claude (signed out)" : codex ? "Codex (signed out)" : "Grok (signed out)"), "signed out card");
   await page.waitForTimeout(5000);
+  if (claude) {
+    // the detail pane opens on the first provider (Codex, disabled): select the ready Claude row so the shot shows its card
+    await page.getByRole("button", { name: /^Select Claude$/ }).first().click({ timeout: 5000 }).catch(() => console.log("FINDING: no `Select Claude` button; detail pane stays on the first provider"));
+    await page.waitForTimeout(800);
+  }
   await shot("providers-top");
   await dumpPage(page, "s18 providers");
   for (let i = 1; i <= 3; i++) {

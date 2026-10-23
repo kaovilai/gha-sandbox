@@ -122,6 +122,7 @@ test("initialize control request: account (claude.ai max, no api key), commands,
   assert.equal(usage.rate_limits_available, true);
   assert.equal(usage.subscription_type, "max");
   assert.ok(usage.rate_limits.five_hour.utilization >= 0 && usage.rate_limits.seven_day.resets_at);
+  assert.deepEqual((await c.control({ subtype: "mcp_set_servers", servers: { "t3-code": { type: "http", url: "http://127.0.0.1:1/mcp" } } })).response, { added: ["t3-code"], removed: [], errors: {} });
   const bad = await c.control({ subtype: "made_up" });
   assert.equal(bad.subtype, "error");
   assert.equal((await c.control({ subtype: "set_model", model: "claude-opus-5-5" })).subtype, "success");

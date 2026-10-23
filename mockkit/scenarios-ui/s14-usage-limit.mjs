@@ -14,12 +14,12 @@ export default async function ({ page, shot, env }) {
     try {
       await banner.waitFor({ state: "visible", timeout: 60_000 });
     } catch (e) {
-      await dumpPage(page, "s14 codex: no usage-limit UI");
+      await dumpPage(page, `s14 ${providerOf(env)}: no usage-limit UI`);
       throw e;
     }
     await page.waitForTimeout(2000);
     await shot("usage-limit");
-    await dumpPage(page, "s14 codex usage limit");
+    await dumpPage(page, `s14 ${providerOf(env)} usage limit`);
     return;
   }
   seedUpstreamGrok(env, "grok_usage", "Upstream (usage limit)", { T3_ACP_EMIT_XAI_RATE_LIMIT_THEN_HANG: "1" });

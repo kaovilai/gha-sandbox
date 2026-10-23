@@ -568,6 +568,8 @@ export function serveClaude({ input = process.stdin, output = process.stdout, en
         return ok(usageResponse());
       case "mcp_status":
         return ok({ mcpServers: [] });
+      case "mcp_set_servers": // T3 registers its own `t3-code` orchestration MCP server on every session; the mock "connects" and never calls it
+        return ok({ added: Object.keys(request.servers ?? {}), removed: [], errors: {} });
       case "get_context_usage":
         return ok({ categories: [], totalTokens: session.tokens.input, maxTokens: CONTEXT_WINDOW, rawMaxTokens: CONTEXT_WINDOW, percentage: Math.min(100, (session.tokens.input / CONTEXT_WINDOW) * 100), gridRows: [], model: session.model, memoryFiles: [], mcpTools: [], agents: [] });
       case "background_tasks":
