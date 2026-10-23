@@ -20,7 +20,16 @@ export function userRequest(text) {
   // Follow-up turns (observed in CI): T3 appends "<runtime_info>...</runtime_info>" to the user text.
   const k = rest.indexOf("<runtime_info>");
   if (k >= 0) rest = rest.slice(0, k);
-  return rest.trim();
+  return stripHandoff(rest.trim());
+}
+
+// After a provider switch mid-thread T3 prepends its own context-handoff block to the user's text
+// ("Context handoff (full_thread_summary):\n<summary>\n\nUser message:\n<text>", ContextHandoffService.ts). That block is
+// T3-internal: a real model answers the user message, so the mock must too (otherwise the echo reply quotes the handoff).
+export function stripHandoff(text) {
+  if (!/^Context handoff \(/.test(text)) return text;
+  const i = text.lastIndexOf("\nUser message:\n");
+  return i >= 0 ? text.slice(i + "\nUser message:\n".length).trim() : text;
 }
 
 const TAG = /\[mock:([a-z0-9_-]+)([^\]]*)\]/gi;

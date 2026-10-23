@@ -1,5 +1,5 @@
 // S31 sidebar thread actions: three threads; context menu (right click) -> pin, settle, snooze, rename, archive.
-import { composerEditor, dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
+import { composerEditor, dumpPage, expectBody, expectText, expectVisible, sendPrompt, startSession } from "../lib/ui.mjs";
 
 const PROMPTS = ["Alpha thread first task", "Bravo thread second task", "Charlie thread third task"];
 
@@ -28,6 +28,9 @@ export default async function ({ page, shot, env }) {
     await page.waitForTimeout(1500);
   }
   await page.waitForTimeout(2500);
+  const rowsNow = await page.locator("[data-thread-item]").count();
+  if (rowsNow !== 3) throw new Error(`assertion failed: expected 3 thread rows in the sidebar, found ${rowsNow}`);
+  for (const t of ["Alpha thread", "Bravo thread", "Charlie thread"]) await expectText(page, new RegExp(t), `sidebar row '${t}'`);
   await shot("three-threads");
   await dumpPage(page, "s31 three threads");
 
@@ -51,10 +54,13 @@ export default async function ({ page, shot, env }) {
   await step("pin", async () => {
     await clickItem(/^Pin thread$/);
     await shot("pinned");
+    // pinned: the row now carries an "Unpin thread" control
+    await expectVisible(page, row("Alpha thread").locator('[aria-label="Unpin thread"]'), "pinned row shows an 'Unpin thread' control");
   });
   await step("settle", async () => {
     await openMenu("Bravo thread");
     await clickItem(/^Settle thread$/);
+    await expectBody(page, /Settled \(1\)/, "sidebar section 'Settled (1)' after settling Bravo");
     await shot("settled");
   });
   await step("snooze", async () => {
@@ -70,6 +76,7 @@ export default async function ({ page, shot, env }) {
     const preset = page.getByText(/\(.*\)$/).filter({ hasNotText: /Custom/ }).last();
     await preset.click();
     await page.waitForTimeout(1200);
+    await expectBody(page, /Snoozed \(1\)/, "sidebar section 'Snoozed (1)' after snoozing Charlie");
     await shot("snoozed");
   });
   await step("rename", async () => {
@@ -81,6 +88,7 @@ export default async function ({ page, shot, env }) {
     await page.keyboard.type("Renamed alpha thread");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(1200);
+    await expectText(page, /Renamed alpha thread/, "sidebar row renamed to 'Renamed alpha thread'");
     await shot("renamed");
   });
   await step("archive", async () => {
@@ -88,6 +96,7 @@ export default async function ({ page, shot, env }) {
     await openMenu("Renamed alpha thread");
     await clickItem(/^Archive thread$/);
     await page.waitForTimeout(800);
+    await expectBody(page, /Archived 1 thread/, "undo notice 'Archived 1 thread'");
     await shot("archived-undo-notice");
   });
   await dumpPage(page, "s31 final");

@@ -111,6 +111,34 @@ export function serveAcp({ input = process.stdin, output = process.stdout, env =
           ...(t.output !== undefined ? { rawOutput: t.output } : {}),
         }),
       plan: (entries) => update(s.id, { sessionUpdate: "plan", entries }),
+      // xAI background shell task (frame shapes: upstream grok_background_bash transcript): the tool call completes with a
+      // BackgroundTaskStarted ack while the process runs; the end is a `_x.ai/task_completed` notification (task_snapshot).
+      bgStart: (t) => {
+        update(s.id, {
+          sessionUpdate: "tool_call",
+          toolCallId: t.id,
+          title: t.description,
+          kind: "execute",
+          status: "in_progress",
+          rawInput: { command: t.cmd, description: t.description, background: true, timeout: 0 },
+        });
+        update(s.id, {
+          sessionUpdate: "tool_call_update",
+          toolCallId: t.id,
+          status: "completed",
+          title: `[bg] ${t.cmd}`,
+          content: [{ type: "content", content: { type: "text", text: `Background task ${t.taskId} started` } }],
+          rawOutput: { type: "BackgroundTaskStarted", task_id: t.taskId, task_type: "bash", status: "running", command: t.cmd, summary: t.description },
+        });
+      },
+      bgDone: (t) =>
+        notify("_x.ai/task_completed", {
+          sessionId: s.id,
+          update: {
+            sessionUpdate: "task_completed",
+            task_snapshot: { task_id: t.taskId, command: t.cmd, description: t.description, output: t.output, exit_code: t.exitCode, completed: true, kind: "bash" },
+          },
+        }),
       permission: async (p) => {
         const res = await callClient(
           "session/request_permission",

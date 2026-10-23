@@ -326,3 +326,49 @@ test("todo scenario starts with a six-entry plan (first entry in progress)", asy
   assert.equal((await done).result.stopReason, "cancelled");
   c.close();
 });
+
+test("background-task: tool call completes with a BackgroundTaskStarted ack, the turn ends, then _x.ai/task_completed reports the finished command", async () => {
+  const c = client();
+  const sid = await session(c);
+  const r = await c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:background-task]") });
+  assert.equal(r.result.stopReason, "end_turn"); // the turn is over while the task is still "pending" for T3
+  const start = c.frames.find((f) => f.params?.update?.sessionUpdate === "tool_call" && f.params.update.rawInput?.background === true);
+  assert.ok(start, "background tool_call");
+  assert.equal(start.params.update.title, "Run the dev server");
+  const ack = c.frames.find((f) => f.params?.update?.rawOutput?.type === "BackgroundTaskStarted");
+  assert.ok(ack, "BackgroundTaskStarted ack");
+  assert.equal(ack.params.update.status, "completed");
+  assert.equal(ack.params.update.toolCallId, start.params.update.toolCallId);
+  const taskId = ack.params.update.rawOutput.task_id;
+  const done = await c.waitFor((f) => f.method === "_x.ai/task_completed");
+  assert.equal(done.params.sessionId, sid);
+  assert.equal(done.params.update.sessionUpdate, "task_completed");
+  assert.equal(done.params.update.task_snapshot.task_id, taskId);
+  assert.equal(done.params.update.task_snapshot.exit_code, 0);
+  assert.match(done.params.update.task_snapshot.output, /dev server listening/);
+  assert.match(text(c.frames), /running in the background/);
+  c.close();
+});
+
+test("background-task: completion waits for the `until` gate even after the process exited", async () => {
+  const c = client();
+  const sid = await session(c);
+  await c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:background-task until=bg-gate]") });
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(c.frames.some((f) => f.method === "_x.ai/task_completed"), false, "held by the gate");
+  mkdirSync(join(c.cwd, ".ctl/release"), { recursive: true });
+  writeFileSync(join(c.cwd, ".ctl/release/bg-gate"), "1");
+  await c.waitFor((f) => f.method === "_x.ai/task_completed");
+  c.close();
+});
+
+test("context handoff preamble (provider switch mid-thread) is not quoted back: the mock answers the user message", async () => {
+  const c = client();
+  const sid = await session(c);
+  const handoff = "Context handoff (full_thread_summary):\nProvider context handoff. Thread: t-1. Covered app runs: 1-1.\nSource item range: a through b.\n\nUser message:\nNow answer from the other provider.";
+  await c.request("session/prompt", { sessionId: sid, prompt: wrap(handoff) });
+  const t = text(c.frames);
+  assert.match(t, /You said: "Now answer from the other provider\."/);
+  assert.doesNotMatch(t, /Context handoff|Provider context handoff/);
+  c.close();
+});

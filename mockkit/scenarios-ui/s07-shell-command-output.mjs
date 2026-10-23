@@ -2,8 +2,8 @@
 // While the command runs we poll the DOM (no fixed sleeps): if T3 renders the streamed stdout ("step 3/8".."5/8") we
 // capture it as `running-midstream`; otherwise we capture the genuine in-progress state (`running-live-status`: "Working
 // for Ns", "Running command" row, red stop button) and log a FINDING that live stdout is not rendered for running
-// commands. The final still shows the completed output (all 8 steps + "build finished").
-import { ask, dumpPage, expandRows, expandWork, startSession } from "../lib/ui.mjs";
+// commands. The final still shows the completed output (all 8 steps + "build finished"), asserted line by line.
+import { ask, dumpPage, expandRows, expandWork, expectBody, expectText, startSession } from "../lib/ui.mjs";
 
 export default async function ({ page, shot, env }) {
   await startSession(page, env);
@@ -35,6 +35,10 @@ export default async function ({ page, shot, env }) {
     await shot("running-MISSED");
     throw new Error("S07: captured neither live stdout nor the in-progress 'Running command' state");
   }
+  // the in-progress still must really be in progress: the final sentence is not there yet
+  if (!midstream && (await page.getByText(/The command finished successfully/).first().isVisible().catch(() => false))) {
+    throw new Error("assertion failed: 'The command finished successfully' already visible at the in-progress still");
+  }
 
   await page.getByText(/finished successfully/).first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(800);
@@ -43,7 +47,10 @@ export default async function ({ page, shot, env }) {
   if (!(await page.getByText(/compiling module-8/).first().isVisible().catch(() => false))) {
     await page.getByText(/while \[/).first().click().catch(() => {}); // the command row label is the command text
   }
-  await page.getByText(/compiling module-8/).first().waitFor({ timeout: 15_000 }).catch(() => {});
+  // every output line of the command is rendered (not just "ran a command")
+  for (let i = 1; i <= 8; i++) await expectBody(page, new RegExp(`step ${i}/8: compiling module-${i}`), `command output line 'step ${i}/8: compiling module-${i}'`, 15_000);
+  await expectBody(page, /build finished/, "final command output line 'build finished'");
+  await expectText(page, /The command finished successfully/, "closing assistant sentence");
   await page.waitForTimeout(600);
   await shot("done");
   await dumpPage(page, "s07 done");

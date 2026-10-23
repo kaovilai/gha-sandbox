@@ -1,6 +1,6 @@
 // S18 provider status matrix: extra grok-driver instances whose launcher reports ready / signed-out / too-old / broken / missing,
-// shown as Settings > Providers cards (and the composer picker).
-import { dumpPage, providerOf, startSession } from "../lib/ui.mjs";
+// shown as Settings > Providers cards (and the composer picker). Each card's status text is asserted (not just that the page loaded).
+import { dumpPage, expectBody, expectText, providerOf, startSession } from "../lib/ui.mjs";
 import { gotoPath, must, seedInstances } from "../lib/ui-extra.mjs";
 
 export default async function ({ page, shot, env }) {
@@ -25,8 +25,16 @@ export default async function ({ page, shot, env }) {
   );
   await page.waitForTimeout(6000); // hot reload + provider probes
   await gotoPath(page, "/settings/providers");
-  await must(page, page.getByText(codex ? "Codex (signed out)" : "Grok (signed out)"), "signed out card");
+  const brand = codex ? "Codex" : "Grok";
+  await must(page, page.getByText(`${brand} (signed out)`), "signed out card");
   await page.waitForTimeout(5000);
+  // all four extra cards are listed, each with its own status line
+  for (const n of ["signed out", "outdated", "broken CLI", "binary missing"]) await expectText(page, `${brand} (${n})`, `provider card '${brand} (${n})'`);
+  await expectBody(page, /Authenticated/, "the ready instance shows 'Authenticated'");
+  await expectBody(page, /Not authenticated/, "signed-out card shows 'Not authenticated'");
+  await expectBody(page, /Unavailable/, "broken-CLI card shows 'Unavailable'");
+  await expectBody(page, /Not found/, "missing-binary card shows 'Not found'");
+  await expectBody(page, codex ? /v0\.100\.0/ : /v0\.0\.1/, `outdated card shows its old version ${codex ? "v0.100.0" : "v0.0.1"}`);
   await shot("providers-top");
   await dumpPage(page, "s18 providers");
   for (let i = 1; i <= 3; i++) {

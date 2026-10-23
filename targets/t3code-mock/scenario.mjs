@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { run } from "../../lib.mjs";
 import { bootT3 } from "../../mockkit/lib/boot.mjs";
+import { buildMaskRules, installMaskContext, maskNow } from "../../mockkit/lib/mask.mjs";
 import { assertShell, dumpPage, skipOnboarding } from "../../mockkit/lib/ui.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -103,6 +104,8 @@ for (const entry of ids) {
     const { stateFile, origin } = await authenticate(srv, id, mod.meta?.firstRun === true);
     process.env.APP_URL = `${origin}/`;
     const env = { ...process.env, MOCKKIT_PROVIDER: entry.prov, MOCKKIT_WS: srv.ws, MOCKKIT_STATE: srv.state, MOCKKIT_ROOT: srv.root, MOCK_CONTROL_DIR: srv.ctl, MOCK_LOG: srv.mockLog };
+    // runner hostname + absolute runner/workspace paths are masked in the DOM (screenshots AND video), see mockkit/lib/mask.mjs
+    const maskRules = buildMaskRules({ ws: srv.ws, root: srv.root });
     await run(
       async ({ page, shot }) => {
         const sshot = (name, opts) => shot(`${id}-${name}`, opts);
@@ -114,7 +117,15 @@ for (const entry of ids) {
           throw e;
         }
       },
-      { viewport: mod.meta?.viewport ?? { width: 1440, height: 900 }, init: mod.meta?.firstRun ? undefined : skipOnboarding, storageState: stateFile },
+      {
+        viewport: mod.meta?.viewport ?? { width: 1440, height: 900 },
+        init: async (context) => {
+          if (!mod.meta?.firstRun) await skipOnboarding(context);
+          await installMaskContext(context, maskRules);
+        },
+        beforeShot: (page) => maskNow(page, maskRules),
+        storageState: stateFile,
+      },
     );
   } catch (e) {
     ok = false;
