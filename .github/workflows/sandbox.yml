@@ -21,6 +21,9 @@ on:
       scenario:
         description: Scenario path in this repo (default targets/<profile>/scenario.mjs)
         default: ""
+      scenarios:
+        description: "Scenario ids for mock profiles, comma list, short prefix (s07) or pack name (web, smoke, all; see mockkit/packs.json). Exported as SCENARIOS."
+        default: ""
       sides:
         description: Which sides to run
         type: choice
@@ -54,7 +57,7 @@ jobs:
   capture:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -132,6 +135,7 @@ jobs:
       - name: Run scenario
         env:
           SCENARIO: ${{ inputs.scenario }}
+          SCENARIOS: ${{ inputs.scenarios }}
         run: node "${SCENARIO:-targets/$PROFILE/scenario.mjs}"
 
       - name: App log
@@ -199,6 +203,8 @@ jobs:
         if: hashFiles('pub/**') != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          SCENARIO_IN: ${{ inputs.scenario }}
+          SCENARIOS_IN: ${{ inputs.scenarios }}
         run: |
           run="$GITHUB_RUN_ID"
           remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"
@@ -211,8 +217,8 @@ jobs:
           fi
           mkdir -p "ev/$run"
           cp pub/* "ev/$run/"
-          printf 'target=%s base=%s head=%s scenario=%s\n' \
-            "${{ inputs.repo }}" "${{ inputs.base_ref }}" "${{ inputs.head_ref }}" "${{ inputs.scenario }}" > "ev/$run/INFO.txt"
+          printf 'target=%s base=%s head=%s scenario=%s scenarios=%s\n' \
+            "${{ inputs.repo }}" "${{ inputs.base_ref }}" "${{ inputs.head_ref }}" "$SCENARIO_IN" "$SCENARIOS_IN" > "ev/$run/INFO.txt"
           git -C ev add -A
           git -C ev commit -q -m "evidence $run"
           for i in 1 2 3; do

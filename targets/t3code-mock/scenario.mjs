@@ -1,51 +1,102 @@
-// Runs mockkit UI drivers: SCENARIOS=id[,id...] (default s03-markdown-stream) -> mockkit/scenarios-ui/<id>.mjs.
+// Runs mockkit UI drivers, ONE ISOLATED T3 Code instance per scenario (fresh DB + workspace + control dir).
+//   SCENARIOS = comma list of driver ids ("s07-shell-command-output"), short prefixes ("s07"), or pack names
+//   from mockkit/packs.json ("web", "smoke", "all", ...). Default: s03-markdown-stream.
 // Each driver: export default async ({ page, shot, env }) => {...}; optional export const meta = { viewport }.
 // Files land flat in $OUT_DIR as <id>-<name>.png and <id>.webm (the publish job only globs top level).
-import { existsSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, mkdirSync, appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
-import { mkdirSync } from "node:fs";
 import { run } from "../../lib.mjs";
-import { dumpPage, skipOnboarding } from "../../mockkit/lib/ui.mjs";
+import { bootT3 } from "../../mockkit/lib/boot.mjs";
+import { assertShell, dumpPage, skipOnboarding } from "../../mockkit/lib/ui.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const uiDir = join(here, "../../mockkit/scenarios-ui");
-const ids = (process.env.SCENARIOS || "s03-markdown-stream").split(",").map((s) => s.trim()).filter(Boolean);
 const out = process.env.OUT_DIR ?? "out";
+const tmp = process.env.RUNNER_TEMP || "/tmp";
+
+// ---- resolve SCENARIOS (ids | prefixes | packs) ----------------------------------------------------
+const drivers = readdirSync(uiDir).filter((f) => f.endsWith(".mjs")).map((f) => f.slice(0, -4)).sort();
+const packs = JSON.parse(readFileSync(join(here, "../../mockkit/packs.json"), "utf8"));
+function resolveIds(spec) {
+  const ids = [];
+  for (const tok of spec.split(",").map((s) => s.trim()).filter(Boolean)) {
+    const list = packs[tok] ? (packs[tok] === "*" ? drivers : packs[tok]) : [tok];
+    for (const t of list) {
+      const hit = drivers.includes(t) ? [t] : drivers.filter((d) => d.startsWith(`${t}-`));
+      if (hit.length === 1) ids.push(hit[0]);
+      else ids.push(t); // unknown/ambiguous: reported as FAIL below
+    }
+  }
+  return [...new Set(ids)];
+}
+const spec = (process.env.SCENARIOS || "").trim() || "s03-markdown-stream";
+const ids = resolveIds(spec);
+console.log(`scenarios (${spec}): ${ids.join(" ")}`);
+
+mkdirSync(out, { recursive: true });
 const results = [];
 
-// The pairing token is ONE-TIME: authenticate once, reuse the session (storageState) for every scenario.
-const stateFile = join(process.env.RUNNER_TEMP || "/tmp", "mockkit", "auth-state.json");
-mkdirSync(dirname(stateFile), { recursive: true });
-{
+// ---- authenticate once per server (the pairing token is ONE-TIME) -> storageState + app origin -------
+async function authenticate(srv, id) {
+  const stateFile = join(srv.root, "auth-state.json");
   const b = await chromium.launch();
-  const c = await b.newContext();
-  const p = await c.newPage();
-  await p.goto(process.env.APP_URL, { waitUntil: "networkidle" });
-  await p.waitForTimeout(3000);
-  await c.storageState({ path: stateFile });
-  process.env.APP_URL = new URL(p.url()).origin + "/";
-  console.log(`authenticated; app origin ${new URL(p.url()).origin}`);
-  await b.close();
+  try {
+    const c = await b.newContext();
+    await skipOnboarding(c);
+    const p = await c.newPage();
+    await p.goto(srv.url, { waitUntil: "networkidle" });
+    await assertShell(p, `authenticated shell (${id})`, 60_000);
+    const text = await p.evaluate(() => document.body.innerText);
+    if (/invalid.*(token|pairing)|pairing.*(invalid|expired)/i.test(text)) throw new Error(`auth: pairing rejected: ${text.slice(0, 200)}`);
+    await c.storageState({ path: stateFile });
+    const origin = new URL(p.url()).origin;
+    console.log(`authenticated; app origin ${origin}`);
+    return { stateFile, origin };
+  } catch (e) {
+    throw new Error(`auth failed for ${id}: ${e.message}`);
+  } finally {
+    await b.close();
+  }
+}
+
+function printMockFrames(mockLog, id) {
+  try {
+    const frames = readFileSync(mockLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const brief = frames.map((f) => {
+      const fr = f.frame;
+      const what = fr ? (fr.method ?? (fr.error ? "error" : "result")) + (fr.params?.update?.sessionUpdate ? `:${fr.params.update.sessionUpdate}` : "") : f.raw ? f.raw.slice(0, 110) : (f.type ?? f.state ?? f.scenario ?? "");
+      return `${f.seq} ${f.dir} ${what}${f.queued ? " (queued)" : ""}`;
+    });
+    const prompts = frames.filter((f) => f.dir === "prompt").map((f) => `turn=${f.turn} scenario=${f.scenario} tag=${f.tag} queued=${f.queued}`);
+    console.log(`::group::mock frames ${id} (${brief.length}), pids=${[...new Set(frames.map((f) => f.pid))].join(",")}\nprompts: ${prompts.join(" | ")}\n${brief.slice(0, 200).join("\n")}\n::endgroup::`);
+  } catch (e) {
+    console.log(`mock log ${id} unreadable: ${e.message}`);
+  }
 }
 
 for (const id of ids) {
   const file = join(uiDir, `${id}.mjs`);
   if (!existsSync(file)) {
-    console.log(`RESULT ${id} FAIL (no driver ${file})`);
+    console.log(`RESULT ${id} FAIL (no driver ${file}; known: ${drivers.join(", ")}; packs: ${Object.keys(packs).join(", ")})`);
     results.push([id, false]);
     continue;
   }
   const mod = await import(pathToFileURL(file).href);
   console.log(`::group::scenario ${id}`);
   let ok = true;
+  let srv;
   try {
+    srv = await bootT3({ id });
+    const { stateFile, origin } = await authenticate(srv, id);
+    process.env.APP_URL = `${origin}/`;
+    const env = { ...process.env, MOCKKIT_WS: srv.ws, MOCK_CONTROL_DIR: srv.ctl, MOCK_LOG: srv.mockLog };
     await run(
       async ({ page, shot }) => {
         const sshot = (name, opts) => shot(`${id}-${name}`, opts);
         try {
-          await mod.default({ page, shot: sshot, env: process.env });
+          await mod.default({ page, shot: sshot, env });
         } catch (e) {
           await sshot("FAILED").catch(() => {});
           await dumpPage(page, `${id} failure`).catch(() => {});
@@ -57,6 +108,14 @@ for (const id of ids) {
   } catch (e) {
     ok = false;
     console.log(`scenario ${id} error: ${e?.stack ?? e}`);
+  } finally {
+    if (srv) {
+      printMockFrames(srv.mockLog, id);
+      await srv.stop().catch((e) => console.log(`stop ${id}: ${e.message}`));
+      try {
+        appendFileSync(process.env.APP_LOG || join(tmp, "app.log"), `\n===== ${id} =====\n${readFileSync(srv.appLog, "utf8")}`);
+      } catch {}
+    }
   }
   const rec = join(out, "recording.webm");
   if (existsSync(rec)) renameSync(rec, join(out, `${id}.webm`));
@@ -64,30 +123,6 @@ for (const id of ids) {
   console.log(`RESULT ${id} ${ok ? "ok" : "FAIL"}`);
   results.push([id, ok]);
 }
-
-// ---- logs into the run log (artifacts only carry png/webm) ----------------------------------------
-function tail(path, n, label) {
-  try {
-    const lines = readFileSync(path, "utf8").split("\n");
-    console.log(`::group::${label} (last ${n} of ${lines.length})\n${lines.slice(-n).join("\n")}\n::endgroup::`);
-  } catch (e) {
-    console.log(`${label}: unreadable (${e.message})`);
-  }
-}
-if (process.env.MOCK_LOG) {
-  try {
-    const frames = readFileSync(process.env.MOCK_LOG, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-    const brief = frames.map((f) => {
-      const fr = f.frame;
-      const what = fr ? (fr.method ?? (fr.error ? "error" : "result")) + (fr.params?.update?.sessionUpdate ? `:${fr.params.update.sessionUpdate}` : "") : (f.raw ? f.raw.slice(0, 110) : (f.type ?? f.state ?? f.scenario ?? ""));
-      return `${f.seq} ${f.dir} ${what}`;
-    });
-    console.log(`::group::mock frames (${brief.length}), pids=${[...new Set(frames.map((f) => f.pid))].join(",")}\n${brief.slice(0, 400).join("\n")}\n::endgroup::`);
-  } catch (e) {
-    console.log(`mock log unreadable: ${e.message}`);
-  }
-}
-if (process.env.MOCKKIT_APP_LOG) tail(process.env.MOCKKIT_APP_LOG, 120, "app log");
 
 console.log(results.map(([id, ok]) => `${id}=${ok ? "ok" : "FAIL"}`).join(" "));
 if (results.some(([, ok]) => !ok)) process.exitCode = 1;

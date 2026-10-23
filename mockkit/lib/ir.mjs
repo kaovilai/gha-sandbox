@@ -192,13 +192,25 @@ export async function runSteps(stepsIn, sink, ctx) {
   }
 }
 
+// Process groups of running shell steps; killed on agent exit (SIGTERM handler -> process.exit) so none are orphaned.
+const liveShells = new Set();
+process.on("exit", () => {
+  for (const pid of liveShells) {
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {}
+  }
+});
+
 function runShell(cmd, ctx, onOutput) {
   return new Promise((resolveP) => {
     const child = spawn("sh", ["-c", cmd], {
       cwd: ctx.cwd,
       env: { ...ctx.env, TERM: "xterm-256color", FORCE_COLOR: "1" },
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true, // own process group so abort/exit also kills grandchildren (sleep ...)
     });
+    liveShells.add(child.pid);
     let acc = "";
     const onData = (d) => {
       acc += d.toString("utf8");
@@ -206,9 +218,16 @@ function runShell(cmd, ctx, onOutput) {
     };
     child.stdout.on("data", onData);
     child.stderr.on("data", onData);
-    const kill = () => child.kill("SIGTERM");
+    const kill = () => {
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+        child.kill("SIGTERM");
+      }
+    };
     ctx.signal?.addEventListener("abort", kill, { once: true });
     child.on("close", (code) => {
+      liveShells.delete(child.pid);
       ctx.signal?.removeEventListener("abort", kill);
       resolveP({ code: code ?? 1, output: acc });
     });

@@ -8,6 +8,7 @@ import { ScenarioError, runSteps } from "../lib/ir.mjs";
 import { makeLog } from "../lib/log.mjs";
 import { abortError, makePace } from "../lib/pace.mjs";
 import { isTextGen, parseTag, promptText, stripTags, userRequest } from "../lib/select.mjs";
+import { dequeue } from "../lib/queue.mjs";
 import { loadScenarios } from "../scenarios/index.mjs";
 
 const MODELS = [
@@ -17,7 +18,7 @@ const MODELS = [
 
 const COMMANDS = [
   { name: "compact", description: "Compress conversation history to save context window", input: { hint: "optional context about what to preserve" } },
-  { name: "mock", description: "Mock agent: pick a scenario with [mock:<id>] in your message", input: { hint: "<scenario id>" } },
+  { name: "mock", description: "Mock agent: pick a scenario with [mock:<id>] in your message, or queue one with mockctl next", input: { hint: "<scenario id>" } },
 ];
 
 export function serveAcp({ input = process.stdin, output = process.stdout, env = process.env } = {}) {
@@ -170,7 +171,13 @@ export function serveAcp({ input = process.stdin, output = process.stdout, env =
       return reply(id, { stopReason: "end_turn" });
     }
     const req = userRequest(raw);
-    const tag = parseTag(req);
+    // Selection order: explicit "[mock:id]" tag in the prompt, else the hidden per-cwd queue (mockctl next), else default.
+    const tag =
+      parseTag(req) ??
+      (() => {
+        const q = dequeue(s.cwd, { ...process.env, ...env });
+        return q ? { id: q.id, args: q.args, text: req, queued: true } : null;
+      })();
     const scenarios = await loadScenarios();
     const scenario = (tag && scenarios.get(tag.id)) || scenarios.get(env.MOCK_DEFAULT_SCENARIO || "echo");
     s.turn += 1;
@@ -190,7 +197,7 @@ export function serveAcp({ input = process.stdin, output = process.stdout, env =
       answers: {},
       nextToolId: () => `mock-call-${++nextTool}`,
     };
-    log("prompt", { scenario: scenario.id, turn: s.turn, tag: tag?.id ?? null, text: ctx.text.slice(0, 200) });
+    log("prompt", { scenario: scenario.id, turn: s.turn, tag: tag?.id ?? null, queued: Boolean(tag?.queued), text: ctx.text.slice(0, 200) });
     const sink = makeSink(s, ac.signal);
     try {
       await runSteps(scenario.steps(ctx), sink, ctx);
@@ -268,6 +275,7 @@ export function serveAcp({ input = process.stdin, output = process.stdout, env =
       case "session/list":
         return reply(id, { sessions: [] });
       case "session/close":
+        sessions.get(params.sessionId)?.abort?.abort();
         sessions.delete(params.sessionId);
         return reply(id, {});
       case "session/prompt":

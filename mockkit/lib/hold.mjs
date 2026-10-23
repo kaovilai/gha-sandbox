@@ -4,11 +4,14 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { abortError } from "./pace.mjs";
 
+export const safeName = (n) => String(n).replace(/[^A-Za-z0-9_.-]/g, "_").replace(/^\.+/, "_");
+
 export function controlDir(env = process.env) {
   return env.MOCK_CONTROL_DIR || join(env.TMPDIR || "/tmp", "mockkit-control");
 }
 
-export async function hold(name, { env = process.env, signal, log } = {}) {
+export async function hold(rawName, { env = process.env, signal, log } = {}) {
+  const name = safeName(rawName);
   const dir = controlDir(env);
   mkdirSync(join(dir, "reached"), { recursive: true });
   mkdirSync(join(dir, "release"), { recursive: true });

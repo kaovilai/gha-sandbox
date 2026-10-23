@@ -6,6 +6,8 @@ import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dequeue, enqueue } from "../lib/queue.mjs";
+import { safeName } from "../lib/hold.mjs";
 
 const bin = join(dirname(fileURLToPath(import.meta.url)), "../bin/t3-mock-acp.mjs");
 
@@ -212,4 +214,55 @@ test("shell step reports stdout + exitCode via rawOutput (what T3 projects as co
   assert.match(done.params.update.rawOutput.stdout, /build finished/);
   assert.equal(done.params.update.rawOutput.exitCode, 0);
   c.close();
+});
+
+test("hidden routing: queued scenario runs with a natural prompt (no [mock:] tag)", async () => {
+  const c = client();
+  const sid = await session(c);
+  const env = { MOCK_CONTROL_DIR: join(c.cwd, ".ctl") };
+  enqueue("markdown-stream", {}, { cwd: c.cwd, env });
+  await c.request("session/prompt", { sessionId: sid, prompt: wrap("Show me a markdown demo") });
+  assert.match(text(c.frames), /\| Provider \| Kind/);
+  const n = c.frames.length;
+  // queue consumed: the next untagged turn falls back to echo
+  await c.request("session/prompt", { sessionId: sid, prompt: wrap("and now?") });
+  assert.match(text(c.frames.slice(n)), /turn 2.*and now\?/);
+  c.close();
+});
+
+test("hidden routing: queue is per cwd, FIFO, and an explicit tag wins without consuming it", async () => {
+  const c = client();
+  const sid = await session(c);
+  const env = { MOCK_CONTROL_DIR: join(c.cwd, ".ctl") };
+  enqueue("error-turn", {}, { cwd: "/nonexistent-other-ws", env });
+  enqueue("markdown-stream", {}, { cwd: c.cwd, env });
+  enqueue("error-turn", {}, { cwd: c.cwd, env });
+  await c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:echo] tagged") });
+  assert.match(text(c.frames), /turn 1.*tagged/); // tag wins, queue untouched
+  let r = await c.request("session/prompt", { sessionId: sid, prompt: wrap("hi") });
+  assert.equal(r.result.stopReason, "end_turn");
+  assert.match(text(c.frames), /\| Provider \| Kind/); // first queued entry for THIS cwd
+  r = await c.request("session/prompt", { sessionId: sid, prompt: wrap("hi again") });
+  assert.equal(r.error.code, -32603); // second entry (error-turn)
+  assert.equal(dequeue("/nonexistent-other-ws", env)?.id, "error-turn"); // other cwd's entry untouched
+  c.close();
+});
+
+test("hidden routing: queue args reach the scenario (slow hold=<name>)", async () => {
+  const c = client();
+  const sid = await session(c);
+  const env = { MOCK_CONTROL_DIR: join(c.cwd, ".ctl") };
+  enqueue("slow", { hold: "gate1" }, { cwd: c.cwd, env });
+  const done = c.request("session/prompt", { sessionId: sid, prompt: wrap("go") });
+  await new Promise((r) => setTimeout(r, 500));
+  c.send({ method: "session/cancel", params: { sessionId: sid } });
+  assert.equal((await done).result.stopReason, "cancelled");
+  assert.ok(readFileSync(join(c.cwd, ".ctl/reached/gate1"), "utf8"));
+  c.close();
+});
+
+test("hold names are sanitized (no path traversal)", () => {
+  assert.ok(!safeName("../../etc/passwd").includes("/"));
+  assert.ok(!safeName("..").startsWith("."));
+  assert.equal(safeName("rec"), "rec");
 });

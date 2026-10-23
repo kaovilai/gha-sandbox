@@ -14,6 +14,12 @@ case "$MODE" in
 esac
 NODE=${MOCK_NODE:-$(command -v node)}
 
+# Probe trace: the CI harness polls $MOCK_CONTROL_DIR/probes.log to know T3 has probed the provider (readiness).
+CTL=${MOCK_CONTROL_DIR:-}
+if [ -n "$CTL" ] && mkdir -p "$CTL" 2>/dev/null; then
+  echo "$(date +%s) $*" >> "$CTL/probes.log" 2>/dev/null || true
+fi
+
 for a in "$@"; do
   case "$a" in
     --version)

@@ -1,13 +1,13 @@
 // S08 approval-allow: composer defaults to "Full access" (auto-approves), so first switch to a supervised
 // mode; the mock then blocks on session/request_permission and the UI shows Approve/Decline.
 // Screenshot pending, click Approve, screenshot resolved.
-import { dumpPage, sendPrompt, setRuntimeMode, startSession } from "../lib/ui.mjs";
+import { ask, dumpPage, setRuntimeMode, startSession } from "../lib/ui.mjs";
 
 export default async function ({ page, shot, env }) {
   await startSession(page, env);
   await setRuntimeMode(page, /^Supervised/, { shot });
   await shot("mode-set");
-  await sendPrompt(page, "[mock:approval-allow] please write a notes file");
+  await ask(page, env, "approval-allow", "Please write a notes file.");
   const approve = page.getByRole("button", { name: /^Approve$/ }).first();
   try {
     await approve.waitFor({ state: "visible", timeout: 60_000 });

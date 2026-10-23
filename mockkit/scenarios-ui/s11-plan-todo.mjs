@@ -1,10 +1,10 @@
 // S11 plan/todo list: ACP `plan` session/update entries (progress shown in the plan/todo UI).
 // NOTE: standard ACP `plan` maps to a todo list, not a ProposedPlanCard (needs xAI exit_plan_mode ext).
-import { dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
+import { ask, dumpPage, startSession } from "../lib/ui.mjs";
 
 export default async function ({ page, shot, env }) {
   await startSession(page, env);
-  await sendPrompt(page, "[mock:plan] track the work");
+  await ask(page, env, "plan", "Track the work for this change.");
   await page.waitForTimeout(1800);
   await shot("plan-early");
   await page.waitForTimeout(3000);

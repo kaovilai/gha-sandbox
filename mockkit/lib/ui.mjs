@@ -1,4 +1,5 @@
 // Shared Playwright helpers for T3 Code UI drivers.
+import { next as queueNext } from "../ctl/mockctl.mjs";
 
 // Skip the first-run wizard (web reads this localStorage key: apps/web/src/clientPersistenceStorage.ts).
 export async function skipOnboarding(context) {
@@ -17,7 +18,7 @@ export async function dumpPage(page, label = "page") {
     text: document.body.innerText.slice(0, 4000),
     buttons: [...document.querySelectorAll("button,[role=button],a[href]")]
       .slice(0, 120)
-      .map((b) => `${b.tagName.toLowerCase()}|${b.getAttribute("aria-label") ?? ""}|${(b.textContent ?? "").trim().slice(0, 40)}|${b.getAttribute("href") ?? ""}|${b.getAttribute("data-testid") ?? ""}`),
+      .map((b) => `${b.tagName.toLowerCase()}|${b.getAttribute("aria-label") ?? ""}|${(b.textContent ?? "").trim().slice(0, 40)}|${b.getAttribute("href") ?? ""}|${b.getAttribute("data-testid") ?? ""}|exp=${b.getAttribute("aria-expanded") ?? ""}|${b.getAttribute("data-v2-item-type") ?? ""}`),
     editable: [...document.querySelectorAll('[contenteditable="true"],textarea,input')]
       .slice(0, 10)
       .map((e) => `${e.tagName.toLowerCase()}|${e.getAttribute("aria-label") ?? ""}|${e.getAttribute("placeholder") ?? ""}|${e.getAttribute("data-testid") ?? ""}|${e.className.toString().slice(0, 60)}`),
@@ -37,56 +38,90 @@ export async function sendPrompt(page, text, { delay = 12 } = {}) {
   await page.keyboard.press("Enter");
 }
 
-// Add the seeded workspace (a small repo created by mockkit/seed/workspace.sh) as a project via the
+// Fail loudly (with a page dump) instead of continuing on a broken shell.
+export async function assertShell(page, label = "app shell", timeout = 60_000) {
+  const addBtn = page.getByRole("button", { name: "Add project" }).first();
+  try {
+    await addBtn.waitFor({ state: "visible", timeout });
+  } catch (e) {
+    const info = await dumpPage(page, `${label} not ready`).catch(() => null);
+    const why = /invalid|expired|unauthori[sz]ed|pairing/i.test(info?.text ?? "") ? " (page text mentions pairing/auth: token invalid or already used?)" : "";
+    throw new Error(`${label}: sidebar "Add project" never became visible within ${timeout}ms${why}; url=${page.url()}`);
+  }
+}
+
+// Add the per-scenario workspace (a small repo created by mockkit/seed/workspace.sh) as a project via the
 // sidebar "Add project" button. Returns the project name shown in the sidebar (dir basename).
 export async function addProject(page, wsPath, { shot } = {}) {
   const name = wsPath.split("/").filter(Boolean).at(-1);
-  if (await page.getByRole("button", { name: `New thread in ${name}` }).first().isVisible().catch(() => false)) return name;
+  await assertShell(page);
   await page.getByRole("button", { name: "Add project" }).first().click();
-  await page.waitForTimeout(800);
-  await shot?.("add-project");
-  await dumpPage(page, "add project dialog");
   const input = page.locator("input:visible").last();
+  await input.waitFor({ state: "visible", timeout: 15_000 });
+  await shot?.("add-project");
   await input.fill(wsPath);
-  await page.waitForTimeout(500);
-  await shot?.("add-project-filled");
+  await page.waitForTimeout(400);
   await page.keyboard.press("Enter");
-  await page.waitForTimeout(2500);
-  await dumpPage(page, "after add project");
+  try {
+    await page.getByRole("button", { name: `New thread in ${name}` }).first().waitFor({ state: "visible", timeout: 30_000 });
+  } catch (e) {
+    await dumpPage(page, "after add project (project not listed)");
+    throw new Error(`project "${name}" (${wsPath}) did not appear in the sidebar`);
+  }
   return name;
 }
 
-// Start a fresh thread (optionally in a named project) and make sure the composer targets the mock model.
+// Start a fresh thread in the project and make sure the composer targets the mock model. Polls until the mock
+// provider is selectable (READY); fails loudly when it never shows up.
 export async function newMockThread(page, { project, shot } = {}) {
-  const btn = project
-    ? page.getByRole("button", { name: `New thread in ${project}` }).first()
-    : page.getByRole("button", { name: "New thread", exact: true }).first();
-  await btn.click();
+  await page.getByRole("button", { name: `New thread in ${project}` }).first().click();
   await composerEditor(page).waitFor({ state: "visible", timeout: 30_000 });
-  await page.waitForTimeout(800);
-  const picker = page.locator("button").filter({ hasText: /Mock (Build|Fast)|gpt-|claude|opus|sonnet|grok/i }).last();
-  const label = ((await picker.textContent().catch(() => "")) ?? "").trim();
-  console.log(`composer model picker: "${label}"`);
-  if (!/Mock/i.test(label)) {
-    await picker.click();
-    await page.waitForTimeout(600);
-    await shot?.("model-picker");
-    await dumpPage(page, "model picker");
-    await page.getByText("Mock Build", { exact: false }).first().click();
-    await page.waitForTimeout(500);
+  const pickerLoc = () => page.locator("button").filter({ hasText: /Mock (Build|Fast)|gpt-|claude|opus|sonnet|grok/i }).last();
+  const deadline = Date.now() + 90_000;
+  let label = "";
+  while (Date.now() < deadline) {
+    label = ((await pickerLoc().textContent({ timeout: 2000 }).catch(() => "")) ?? "").trim();
+    if (/Mock/i.test(label)) {
+      console.log(`composer model picker: "${label}"`);
+      return;
+    }
+    if (label) {
+      await pickerLoc().click().catch(() => {});
+      const opt = page.getByText("Mock Build", { exact: false }).first();
+      if (await opt.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await shot?.("model-picker");
+        await opt.click();
+        await page.waitForTimeout(500);
+        continue;
+      }
+      await page.keyboard.press("Escape").catch(() => {});
+    }
+    await page.waitForTimeout(1000);
   }
+  await dumpPage(page, "model picker (mock never selectable)");
+  throw new Error(`mock provider never became selectable in the composer (picker label: "${label}")`);
 }
 
 export async function waitText(page, matcher, timeout = 60_000) {
   await page.getByText(matcher).first().waitFor({ state: "visible", timeout });
 }
 
-// Fresh mock-backed thread inside the seeded workspace project (shared by most drivers).
+// Fresh mock-backed thread inside this scenario's own workspace project (env.MOCKKIT_WS; one server per scenario).
 export async function startSession(page, env) {
-  await page.waitForTimeout(2000);
   const project = await addProject(page, env.MOCKKIT_WS);
   await newMockThread(page, { project });
   return project;
+}
+
+// Hidden routing: the NEXT user turn in this scenario's workspace runs mock scenario <id>; no "[mock:..]" in the UI.
+export function nextScenario(env, id, args = {}) {
+  queueNext(id, args, { cwd: env.MOCKKIT_WS, env });
+}
+
+// Queue scenario <id> for the next turn, then type a natural prompt.
+export async function ask(page, env, id, prompt, args = {}) {
+  nextScenario(env, id, args);
+  await sendPrompt(page, prompt);
 }
 
 // Expand the collapsed "Worked for Ns" work log (tool calls / reasoning) when present.
@@ -98,6 +133,24 @@ export async function expandWork(page) {
     return true;
   }
   return false;
+}
+
+// Click every collapsed timeline row (role=button aria-expanded=false) matching `filter`; returns how many were opened.
+// Rows expose data-v2-item-type (e.g. "reasoning") and aria-expanded (apps/web TimelineWorkEntryRow).
+export async function expandRows(page, { type, hasText } = {}) {
+  let sel = `[role="button"][aria-expanded="false"]`;
+  if (type) sel = `[data-v2-item-type*="${type}"]${sel}`;
+  let loc = page.locator(sel);
+  if (hasText) loc = loc.filter({ hasText });
+  let n = 0;
+  for (const el of await loc.all()) {
+    if (await el.isVisible().catch(() => false)) {
+      await el.click().catch(() => {});
+      n += 1;
+    }
+  }
+  if (n) await page.waitForTimeout(600);
+  return n;
 }
 
 // Switch the composer runtime mode (default "Full access" auto-approves everything, so no prompts).
