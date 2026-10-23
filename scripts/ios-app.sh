@@ -20,17 +20,14 @@ grep -q 'const metroHost = "127.0.0.1";' scripts/mobile-showcase.ts || echo "WAR
 mkdir -p "$out/diag"
 ( i=0; while :; do sleep 45; i=$((i+1)); xcrun simctl io booted screenshot "$out/diag/t$(printf %03d "$i").png" >/dev/null 2>&1 || true; done ) &
 diag1=$!
-( until curl -s -o /dev/null http://127.0.0.1:8199/status; do sleep 2; done
-  while :; do
-    printf '%s ' "$(date -u +%T)" >> "$out/diag/metro-timing.log"
-    curl -s -o /dev/null -m 60 -H 'expo-platform: ios' -w 'manifest=%{http_code} %{time_total}s\n' \
-      http://127.0.0.1:8199/ >> "$out/diag/metro-timing.log" 2>&1 || echo "curl failed" >> "$out/diag/metro-timing.log"
-    sleep 15
-  done ) &
+# Metro answers the dev-client manifest in 7-25 s on 3 vCPUs; the launcher times out at 10 s.
+# Front it with a caching proxy and point the app's Metro URL at the proxy (:8200).
+perl -pi -e 's/const metroUrl = `http:\/\/\$\{metroHost\}:\$\{config\.metroPort\}\?/const metroUrl = `http:\/\/\$\{metroHost\}:8200?/' scripts/mobile-showcase.ts
+grep -q 'metroHost}:8200?' scripts/mobile-showcase.ts || echo "WARN: metroUrl proxy patch did not apply"
+node "$root/scripts/metro-manifest-proxy.mjs" > "$out/diag/proxy.log" 2>&1 &
 diag2=$!
 pnpm screenshots:mobile "${args[@]}" 2>&1 | tee "$out/pass1.log"
 rc1=${PIPESTATUS[0]}
-kill "$diag1" "$diag2" 2>/dev/null || true
 mkdir -p "$out/screenshots"
 cp -r artifacts/app-store/screenshots/apple/. "$out/screenshots/" 2>/dev/null || true
 
@@ -45,6 +42,7 @@ if [ "$rc1" -eq 0 ]; then
   sleep 4
   kill "$watcher" 2>/dev/null || true
 fi
+kill "$diag1" "$diag2" 2>/dev/null || true
 cd "$root"
 find "$out" -type f | head -40
 exit "$rc1"
