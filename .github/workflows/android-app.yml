@@ -12,6 +12,10 @@ on:
       ref:
         description: Ref (branch/sha, or pull/<N>/head)
         default: main
+      live:
+        description: After the showcase pass, drive LIVE mockkit threads in the app (streaming, approval, question)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,6 +28,7 @@ jobs:
       T3_SHOWCASE_ANDROID_ABI: x86_64
       NODE_OPTIONS: --max-old-space-size=4096
       OUT_DIR: ${{ github.workspace }}/out/android-app
+      LIVE: ${{ inputs.live && '1' || '0' }}
     steps:
       - name: Free disk (Android SDK + Gradle + emulator image are large)
         run: |

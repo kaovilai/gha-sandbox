@@ -47,6 +47,8 @@ if (existsSync(settingsPath)) {
   } catch {}
 }
 settings.providerInstances = { ...(settings.providerInstances ?? {}), ...providerInstances };
+// Supervised threads (approvals) for CLI-started threads: they take their mode from the environment default.
+if (process.env.MOCK_DEFAULT_RUNTIME_MODE) settings.defaultRuntimeMode = process.env.MOCK_DEFAULT_RUNTIME_MODE;
 // Titles / commit messages / PR text go through the same mock (it answers JSON without running scenarios).
 settings.textGenerationModelSelection = { instanceId: "grok", model: "grok-build" };
 writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);

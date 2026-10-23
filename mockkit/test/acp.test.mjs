@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -258,6 +258,24 @@ test("hidden routing: queue args reach the scenario (slow hold=<name>)", async (
   c.send({ method: "session/cancel", params: { sessionId: sid } });
   assert.equal((await done).result.stopReason, "cancelled");
   assert.ok(readFileSync(join(c.cwd, ".ctl/reached/gate1"), "utf8"));
+  c.close();
+});
+
+test("live-stream holds after step 5 then finishes (mobile S40)", async () => {
+  const c = client();
+  const sid = await session(c);
+  const env = { MOCK_CONTROL_DIR: join(c.cwd, ".ctl") };
+  enqueue("live-stream", { hold: "lv" }, { cwd: c.cwd, env });
+  const done = c.request("session/prompt", { sessionId: sid, prompt: wrap("go") });
+  const f = join(c.cwd, ".ctl/reached/lv");
+  for (let i = 0; i < 50 && !existsSync(f); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(existsSync(f));
+  assert.match(text(c.frames), /Step 5 of 8/);
+  assert.doesNotMatch(text(c.frames), /Step 6 of 8/);
+  mkdirSync(join(c.cwd, ".ctl/release"), { recursive: true });
+  writeFileSync(join(c.cwd, ".ctl/release/lv"), "1");
+  assert.equal((await done).result.stopReason, "end_turn");
+  assert.match(text(c.frames), /Step 8 of 8[\s\S]*Live stream complete/);
   c.close();
 });
 
