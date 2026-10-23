@@ -32,21 +32,30 @@ perl -pi -e 's/const metroUrl = `http:\/\/\$\{metroHost\}:\$\{config\.metroPort\
 grep -q 'metroHost}:8200?' scripts/mobile-showcase.ts || echo "WARN: metroUrl proxy patch did not apply"
 node "$root/scripts/metro-manifest-proxy.mjs" > "$out/diag/proxy.log" 2>&1 &
 diag2=$!
-pnpm screenshots:mobile "${args[@]}" 2>&1 | tee "$out/pass1.log"
+pnpm screenshots:mobile "${args[@]}" --keep-running 2>&1 | tee "$out/pass1.log"
 rc1=${PIPESTATUS[0]}
 mkdir -p "$out/screenshots"
 cp -r artifacts/app-store/screenshots/apple/. "$out/screenshots/" 2>/dev/null || true
 
 if [ "$rc1" -eq 0 ]; then
-  (
-    until xcrun simctl list devices | grep -q '(Booted)'; do sleep 2; done
-    xcrun simctl io booted recordVideo --codec h264 --force "$out/recording.mp4"
-  ) &
-  watcher=$!
-  pnpm screenshots:mobile "${args[@]}" --skip-build 2>&1 | tee "$out/pass2.log"
-  pkill -INT -f 'simctl io booted recordVideo' || true
-  sleep 4
-  kill "$watcher" 2>/dev/null || true
+  # A second full showcase pass (Metro restart + re-warm) hung on 3 vCPUs. Instead record a short
+  # clip from the still-running simulator while AXe scrolls the app.
+  udid=$(xcrun simctl list devices booted -j | jq -r '[.devices[][] | select(.state=="Booted")][0].udid // empty')
+  if [ -n "$udid" ]; then
+    xcrun simctl io "$udid" recordVideo --codec h264 --force "$out/recording.mp4" &
+    rec=$!
+    sleep 3
+    for _ in 1 2 3; do
+      axe swipe --start-x 220 --start-y 600 --end-x 220 --end-y 250 --duration 0.6 --udid "$udid" || true
+      sleep 2
+      axe swipe --start-x 220 --start-y 250 --end-x 220 --end-y 600 --duration 0.6 --udid "$udid" || true
+      sleep 2
+    done
+    kill -INT "$rec" 2>/dev/null || true
+    wait "$rec" 2>/dev/null || true
+  else
+    echo "no booted simulator; skipping recording"
+  fi
 fi
 kill "$diag1" "$diag2" 2>/dev/null || true
 cd "$root"
