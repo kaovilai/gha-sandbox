@@ -220,11 +220,45 @@ Frame shapes come from the upstream recorded transcripts (`orchestration-v2/test
 * **Text generation.** `exec` reads the prompt from stdin and writes JSON for the keys named in the `--output-schema` file to `--output-last-message` (shared `lib/textgen.mjs`).
   S24 shows the commit subject "Update files via mock agent" coming from it. Any other request gets JSON-RPC -32601 instead of hanging.
 * **Limits (honest).** Model names look like real Codex models (`gpt-6-astra`...) but every answer is scripted; the picker shows "Legacy models" for gpt-5.6-sol (T3 grouping).
-  No `item/permissions/requestApproval`, MCP elicitation, subagent (`collabAgentToolCall`) or goal frames are produced; `thread/goal/*` just answers empty and
-  `thread/revert` is unhandled (-32601). `thread/compact/start` runs a bare `contextCompaction` turn. Agent messages are all `phase:"final_answer"` (no `commentary` phase).
+  No dynamic-tool or background-terminal frames are produced (permission, MCP elicitation, subagent, goal, revert, MCP app, web search and retry frames are: see "Codex gaps closed" below). `thread/compact/start` runs a bare `contextCompaction` turn. Agent messages are `phase:"final_answer"` unless a scenario says `phase:"commentary"`.
   The file-change approval card shows the absolute runner path of the file (Codex sends absolute paths). Switching provider mid-thread (S20) leaks T3's handoff prompt into the
   echo answer, same as Grok. Sidebar thread titles come from the prompt text, not the scenario title (hidden routing has no tag). Real `codex` behaviour that depends on a
   model (planning, tool choice) is not simulated.
+
+## Codex gaps closed (track codex-gaps)
+
+Audit of T3's Codex adapter (`apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts`, t3code main 2026-10-23) against `adapters/codex.mjs`.
+Every server request T3 answers and every notification it consumes, with what the mock now does. New IR ops are provider-neutral
+(`lib/ir.mjs`); the ACP adapter degrades them (see the IR header), unit tests in `test/codex-gaps.test.mjs`.
+
+| T3 handles | mock | IR / scenario | driver (pack `codex-extra`) |
+| --- | --- | --- | --- |
+| `mcpServer/elicitation/request` | form request with `_meta.app_name` + `persist`, accept/decline/cancel + persist scope | `S.elicit` / `mcp-elicit` | s50 |
+| `item/permissions/requestApproval` | permission profile (fs read/write, network); empty grant = decline | `S.grant` / `perm-grant` | s51 |
+| `collabAgentToolCall` (`spawnAgent`, `wait`) + child thread turns | child thread (own ids, `parentThreadId`), child items stream on child ids, `wait` carries the result | `S.subagent` / `subagent-spawn`, `subagent-approval` | s52, s59 |
+| `thread/goal/{get,set,clear}`, `thread/goal/updated\|cleared` | per-thread goal, token/time accrual, IR step updates status | `S.goal` / `goal-work` | s53 (`/goal <text>` typed in the composer) |
+| `thread/turns/list` (desc + cursor), `thread/revert` | newest-first paging, drops the target turn and all later ones, survives respawn; `thread/rollback{numTurns}` also answered | none (protocol) | s54 ("Edit from here") |
+| `account/read` chatgpt, `account/rateLimits/read` (+ `accountId`, `rateLimitResetCredits`), `account/rateLimitResetCredit/consume` | `MOCK_CODEX_ACCOUNT=chatgpt`, `MOCK_CODEX_PLAN`, `MOCK_CODEX_RESET_CREDITS`; driver `meta.env` sets them per scenario | none | s55 (`/usage-limits`, Use reset, Providers card) |
+| `webSearch` item, `agentMessage.phase = commentary` | search then openPage; commentary phase | `S.web`, `S.say(..,{phase})` / `web-search` | s56 |
+| `error {willRetry:true}` (provider retry row) | `Reconnecting... n/5` | `S.retry` / `provider-retry` | s57 |
+| `mcpToolCall.mcpAppUi` + `mcpServer/resource/read` (MCP app frame) | `ui://` HTML served with mime `text/html;profile=mcp-app`; `mcpServer/tool/call` answers ok | `S.mcpApp` / `mcp-app` | s58 |
+| `execCommandApproval`, `applyPatchApproval` (legacy) | `MOCK_CODEX_LEGACY_APPROVALS=1` | `S.permission` unchanged | unit test only |
+
+Run: `-f scenarios=codex-extra` (or `codex,codex-extra`). Verified in CI (screenshots read), what T3 really shows:
+
+* **s50** "App access approval" + connector name, Decline / Approve and an overflow menu (Cancel, Always allow this session, Always allow). The persist choices are only in the `...` menu.
+* **s51** renders as "File change approval" with the `reason` text; the granted paths are NOT shown. Granting lets the write happen (`dist/build.log`).
+* **s52** "Subagent Running" row with the child's latest text, a Lineage panel in the right rail, "N subagents" summary, child thread page ("Subagent of ...", "Open parent"). Subagent rows are titled "Subagent" (no nickname).
+* **s59** the child's approval card appears in the PARENT composer; approving finishes both turns (+3 -0 NOTES.md). The card shows the absolute runner path (Codex sends absolute paths).
+* **s53** composer banner "Pursuing goal <objective>" -> "Goal complete · 4k tokens" + Clear; sidebar shows "Goal 3s". `/goal clear` answers locally in T3 ("Goal cleared.").
+* **s54** "Edit from here" dialog; "Revert and keep changes" rewinds the thread (the 3rd prompt returns to the composer, the next turn counts from 3 again). "Revert files too" is refused by T3 itself ("File restore requires an isolated worktree", shared workspace), captured as a finding, not a mock gap.
+* **s55** Providers card "Authenticated as <blurred email> · ChatGPT Pro 20x Subscription"; `/usage-limits` banner with Session 77% / Weekly 59% left, "1 reset credit banked", "Use reset" (confirm dialog "Use a reset credit?", then `consume` answers `reset` and T3 re-probes).
+* **s56** commentary line before the answer, work log "Searched the web 2 times". **s57** "Retrying provider (2/5)" row while held, cleared when output resumes. **s58** the HTML app renders inline in the timeline (sandboxed iframe).
+
+Not covered (honest): background terminals (`thread/backgroundTerminals/*`, a command item that outlives its turn, T3 then re-prompts the agent on completion),
+`dynamicToolCall` items, async questions (`agentMessage.delivery:"async"`), `subAgentActivity` items (newer subagent protocol; the mock uses `collabAgentToolCall`),
+`thread/closed`, `model/rerouted`, `thread/settings/updated`, `item/reasoning/textDelta` (raw reasoning), real `mcpServerStatus/list` data, `account/login/*` (T3 uses its own managed login, needs the real CLI download).
+Codex sends the goal's first turn before `thread/goal/set active`: a scenario that finishes faster than that round trip (no hold) races the status, so goal scenarios use `hold=`.
 
 ## Known limits
 

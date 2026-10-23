@@ -9,6 +9,7 @@ export default async function ({ page, shot, env }) {
   await ask(page, env, "subagent-approval", "Have a worker write the notes file.");
   await page.waitForTimeout(6000);
   const info = await dumpPage(page, "s59 child approval pending");
+  // observed (run 40001079254): T3 shows the child's approval card directly in the PARENT composer (no "Open approval" hop needed)
   console.log(`FINDING parent surfaces child approval: openApproval=${/Open approval/.test(info.text)} approvalBadge=${/Approval/.test(info.text)} approveButtonInParent=${/Approve/.test(info.text)}`);
   await shot("parent-pending");
   const open = page.getByRole("button", { name: /Open approval/ }).first();

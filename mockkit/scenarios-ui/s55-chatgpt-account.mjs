@@ -29,7 +29,10 @@ export default async function ({ page, shot, env }) {
   const useReset = page.getByRole("button", { name: /Use reset/ }).first();
   if (await useReset.isVisible().catch(() => false)) {
     await useReset.click();
-    await page.waitForTimeout(3500);
+    await page.waitForTimeout(1500);
+    await shot("use-reset-confirm");
+    await page.getByRole("button", { name: /^Use credit$/ }).click().catch(() => console.log("FINDING: no 'Use credit' confirm button"));
+    await page.waitForTimeout(4500);
     const after = await dumpPage(page, "s55 after Use reset");
     console.log(`FINDING after Use reset: credit-text=${JSON.stringify(after.text.match(/[^\n]*reset credit[^\n]*/i)?.[0] ?? null)} useResetStillThere=${/Use reset/.test(after.text)}`);
     await shot("usage-limits-after-reset");

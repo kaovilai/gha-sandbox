@@ -46,17 +46,28 @@ export default async function ({ page, shot, env }) {
   await page.getByText(/turn 3/).first().waitFor({ timeout: 60_000 }).catch(() => console.log("FINDING: no 'turn 3' after revert (history not rolled back?)"));
   await page.waitForTimeout(1500);
   await shot("continued");
-  // second revert, this time "Revert files too" on the edit turn: the Changes counter drops back to +0 -0 and src/ is restored
-  const secondMsg = page.getByText("Update the greeting helper.").first();
-  await secondMsg.hover();
+  // second revert on the edit turn. First "Revert files too": T3 itself refuses it unless the thread has an isolated worktree
+  // (T3 behaviour, not the mock: "File restore requires an isolated worktree"), the error banner is captured. Then
+  // "Revert and keep changes" rolls the conversation back past the edit turn (Codex thread/revert with 2 turns), files stay.
+  await page.getByText("Update the greeting helper.").first().hover();
   await page.waitForTimeout(600);
   await page.getByRole("button", { name: "Edit from here" }).nth(1).click();
   await page.waitForTimeout(1200);
   await shot("confirm-dialog-revert-files");
   await page.getByRole("button", { name: /^Revert files too$/ }).click();
-  await page.waitForFunction(() => !document.body.innerText.includes("Open the diff panel"), null, { timeout: 60_000 }).catch(() => console.log("FINDING: edit turn still visible after revert-files"));
   await page.waitForTimeout(3000);
-  await shot("after-revert-files");
-  const fin = await dumpPage(page, "s54 after revert files");
-  console.log(`FINDING after revert files: changes=${JSON.stringify(fin.text.match(/Changes\s*\+\d+\s*-\d+/)?.[0] ?? null)} editTurnGone=${!/Open the diff panel/.test(fin.text)}`);
+  const refused = await dumpPage(page, "s54 revert files too");
+  console.log(`FINDING Revert files too refused by T3 (shared workspace): ${/isolated worktree/.test(refused.text)}`);
+  await shot("revert-files-refused-by-t3");
+  await page.getByRole("button", { name: /Dismiss|Close/i }).first().click().catch(() => {});
+  await page.getByText("Update the greeting helper.").first().hover();
+  await page.waitForTimeout(600);
+  await page.getByRole("button", { name: "Edit from here" }).nth(1).click();
+  await page.waitForTimeout(1200);
+  await page.getByRole("button", { name: /^Revert and keep changes$/ }).click();
+  await page.waitForFunction(() => !document.body.innerText.includes("Open the diff panel"), null, { timeout: 60_000 }).catch(() => console.log("FINDING: edit turn still visible after the second revert"));
+  await page.waitForTimeout(3000);
+  await shot("after-second-revert");
+  const fin = await dumpPage(page, "s54 after second revert");
+  console.log(`FINDING after second revert: editTurnGone=${!/Open the diff panel/.test(fin.text)} firstTurnKept=${/turn 1/.test(fin.text)} changes=${JSON.stringify(fin.text.match(/Changes\s*\+\d+\s*-\d+/)?.[0] ?? null)}`);
 }
