@@ -145,7 +145,7 @@ export async function runSteps(stepsIn, sink, ctx) {
           break;
         }
         const id = ctx.nextToolId();
-        const taskId = a.taskId ?? `bg-${id}`;
+        const taskId = a.taskId ?? `a1b2c3d4-e5f6-4a7b-8c9d-${id.replace(/\D+/g, "").padStart(12, "0")}`; // uuid-shaped like Grok task ids (T3 shows its first 8 chars)
         await sleep(pace.toolMs, signal);
         const info = { id, taskId, cmd: a.cmd, description: a.description ?? a.cmd, kind: a.kind ?? "command", persistent: a.persistent === true };
         sink.bgStart(info);
