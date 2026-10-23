@@ -39,15 +39,17 @@ mkdirSync(out, { recursive: true });
 const results = [];
 
 // ---- authenticate once per server (the pairing token is ONE-TIME) -> storageState + app origin -------
-async function authenticate(srv, id) {
+async function authenticate(srv, id, firstRun = false) {
   const stateFile = join(srv.root, "auth-state.json");
   const b = await chromium.launch();
   try {
     const c = await b.newContext();
-    await skipOnboarding(c);
+    if (!firstRun) await skipOnboarding(c);
     const p = await c.newPage();
     await p.goto(srv.url, { waitUntil: "networkidle" });
-    await assertShell(p, `authenticated shell (${id})`, 60_000);
+    // first-run drivers (meta.firstRun) land on the setup wizard, not the app shell
+    if (firstRun) await p.waitForTimeout(4000);
+    else await assertShell(p, `authenticated shell (${id})`, 60_000);
     const text = await p.evaluate(() => document.body.innerText);
     if (/invalid.*(token|pairing)|pairing.*(invalid|expired)/i.test(text)) throw new Error(`auth: pairing rejected: ${text.slice(0, 200)}`);
     await c.storageState({ path: stateFile });
@@ -89,9 +91,9 @@ for (const id of ids) {
   let srv;
   try {
     srv = await bootT3({ id });
-    const { stateFile, origin } = await authenticate(srv, id);
+    const { stateFile, origin } = await authenticate(srv, id, mod.meta?.firstRun === true);
     process.env.APP_URL = `${origin}/`;
-    const env = { ...process.env, MOCKKIT_WS: srv.ws, MOCK_CONTROL_DIR: srv.ctl, MOCK_LOG: srv.mockLog };
+    const env = { ...process.env, MOCKKIT_WS: srv.ws, MOCKKIT_STATE: srv.state, MOCKKIT_ROOT: srv.root, MOCK_CONTROL_DIR: srv.ctl, MOCK_LOG: srv.mockLog };
     await run(
       async ({ page, shot }) => {
         const sshot = (name, opts) => shot(`${id}-${name}`, opts);
@@ -103,7 +105,7 @@ for (const id of ids) {
           throw e;
         }
       },
-      { viewport: mod.meta?.viewport ?? { width: 1440, height: 900 }, init: skipOnboarding, storageState: stateFile },
+      { viewport: mod.meta?.viewport ?? { width: 1440, height: 900 }, init: mod.meta?.firstRun ? undefined : skipOnboarding, storageState: stateFile },
     );
   } catch (e) {
     ok = false;

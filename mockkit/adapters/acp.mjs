@@ -150,6 +150,12 @@ export function serveAcp({ input = process.stdin, output = process.stdout, env =
         if (o?.outcome === "cancelled") return "cancel";
         return /reject/i.test(o?.optionId ?? "") ? "reject" : "allow";
       },
+      exitPlan: ({ planContent }) =>
+        callClient(
+          "_x.ai/exit_plan_mode",
+          { method: "x.ai/exit_plan_mode", params: { sessionId: s.id, toolCallId: `mock-exit-plan-${++nextTool}`, planContent } },
+          signal,
+        ),
       ask: async ({ questions }) => {
         const res = await callClient(
           "_x.ai/ask_user_question",
