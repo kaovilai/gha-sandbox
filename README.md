@@ -66,6 +66,11 @@ inputs (`pnpm-lock.yaml`, `apps/mobile/{app.config.ts,package.json,plugins,modul
 | Android | debug `app-debug.apk` (reused via `--skip-build`); AVD snapshot (fast boot); Gradle (`setup-gradle`); Metro transform cache | native hash; AVD config; lockfile + ISO week |
 | iOS | built `T3Code.app` (reused via `--skip-build`); Metro transform cache | native hash; lockfile + ISO week |
 
+Measured (capture job, cold -> all caches warm): **desktop 9 -> 2.5 min, iOS 16.5 -> 5 min,
+Android 33 -> 12 min** (AVD snapshot boots in ~1 min instead of ~4; remaining time is the capture itself).
+The native-inputs hash is computed once before the build, because the build modifies some hashed
+files and the save key would otherwise differ from the restore key.
+
 Metro cache paths are best guesses (`$TMPDIR/metro-cache`, `node_modules/.cache`, `.expo`); the
 `Report cache dir sizes` step prints what actually exists so the paths can be corrected.
 Prune with `gh cache list` / `gh cache delete`.
