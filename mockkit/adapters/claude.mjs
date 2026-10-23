@@ -652,7 +652,7 @@ export async function printText({ argv, stdin, env = process.env, stdout = proce
   const json = textGenJson(stdin ?? "", await loadScenarios(), { keys });
   const obj = JSON.parse(json);
   for (const k of keys ?? []) if (!(k in obj)) obj[k] = "mock";
-  makeLog(env.MOCK_LOG, { agent: "claude-print" })("textgen", { reply: obj, keys });
+  makeLog(env.MOCK_LOG, { agent: "claude-print" })("textgen", { reply: JSON.stringify(obj), keys });
   const sessionId = randomUUID();
   const out = { type: "result", subtype: "success", is_error: false, api_error_status: null, duration_ms: 1, duration_api_ms: 1, num_turns: 1, result: "", stop_reason: "end_turn", session_id: sessionId, total_cost_usd: 0, usage: usageObj(1, 1), modelUsage: {}, permission_denials: [], structured_output: obj, uuid: randomUUID() };
   stdout.write(`${JSON.stringify(out)}\n`);
