@@ -1,11 +1,12 @@
-// S08 approval-allow: the mock blocks on session/request_permission; the UI shows Approve/Decline.
-// Screenshot pending, click Approve, screenshot resolved (file written, turn completed).
-import { addProject, dumpPage, newMockThread, sendPrompt } from "../lib/ui.mjs";
+// S08 approval-allow: composer defaults to "Full access" (auto-approves), so first switch to a supervised
+// mode; the mock then blocks on session/request_permission and the UI shows Approve/Decline.
+// Screenshot pending, click Approve, screenshot resolved.
+import { dumpPage, sendPrompt, setRuntimeMode, startSession } from "../lib/ui.mjs";
 
 export default async function ({ page, shot, env }) {
-  await page.waitForTimeout(2500);
-  const project = await addProject(page, env.MOCKKIT_WS, { shot });
-  await newMockThread(page, { project, shot });
+  await startSession(page, env);
+  await setRuntimeMode(page, /supervised|approval|ask/i, { shot });
+  await shot("mode-set");
   await sendPrompt(page, "[mock:approval-allow] please write a notes file");
   const approve = page.getByRole("button", { name: /^Approve$/ }).first();
   try {

@@ -80,3 +80,38 @@ export async function newMockThread(page, { project, shot } = {}) {
 export async function waitText(page, matcher, timeout = 60_000) {
   await page.getByText(matcher).first().waitFor({ state: "visible", timeout });
 }
+
+// Fresh mock-backed thread inside the seeded workspace project (shared by most drivers).
+export async function startSession(page, env) {
+  await page.waitForTimeout(2000);
+  const project = await addProject(page, env.MOCKKIT_WS);
+  await newMockThread(page, { project });
+  return project;
+}
+
+// Expand the collapsed "Worked for Ns" work log (tool calls / reasoning) when present.
+export async function expandWork(page) {
+  const row = page.getByText(/^Worked for/).first();
+  if (await row.isVisible().catch(() => false)) {
+    await row.click().catch(() => {});
+    await page.waitForTimeout(800);
+    return true;
+  }
+  return false;
+}
+
+// Switch the composer runtime mode (default "Full access" auto-approves everything, so no prompts).
+export async function setRuntimeMode(page, labelRe, { shot } = {}) {
+  await page.getByRole("button", { name: "Runtime mode" }).first().click();
+  await page.waitForTimeout(500);
+  await shot?.("runtime-mode-menu");
+  await dumpPage(page, "runtime mode menu");
+  await page
+    .getByRole("menuitemradio", { name: labelRe })
+    .or(page.getByRole("menuitem", { name: labelRe }))
+    .or(page.getByRole("option", { name: labelRe }))
+    .or(page.getByText(labelRe))
+    .first()
+    .click();
+  await page.waitForTimeout(500);
+}

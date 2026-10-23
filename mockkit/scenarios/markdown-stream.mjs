@@ -38,5 +38,5 @@ That is the end of the **markdown** stream.`;
 export default {
   id: "markdown-stream",
   title: "Markdown streaming demo",
-  steps: () => [S.say(MD, { chunk: 5, paceMs: 45 })],
+  steps: () => [S.say(MD, { chunk: 3, paceMs: 70 })],
 };
