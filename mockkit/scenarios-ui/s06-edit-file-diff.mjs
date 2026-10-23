@@ -29,27 +29,19 @@ export default async function ({ page, shot, env }) {
   // (the Diff panel renders in shadow DOM: text locators pierce it, body.innerText does not)
   await expectText(page, "src/farewell.ts", "diff panel row src/farewell.ts");
   await expectText(page, "src/greeting.ts", "diff panel row src/greeting.ts");
-  // expand the file rows to show the actual hunks (row chevron, not the filename: filename opens the file viewer)
-  const chevrons = page.locator("button[aria-label^='Expand'], button[aria-label*='xpand file']");
-  console.log(`FINDING expand controls in diff panel: ${await chevrons.count()}`);
-  await page.getByRole("button", { name: /Expand all|Toggle diff/i }).first().click().catch(() => {});
-  await page.mouse.click(917, 107).catch(() => {}); // chevron of first file row
-  await page.waitForTimeout(800);
-  // farewell.ts (new file) now shows its added lines
-  if (!(await page.getByText(/Goodbye/).first().isVisible().catch(() => false))) {
-    await page.getByText("src/farewell.ts", { exact: true }).first().click().catch(() => {});
-    await page.waitForTimeout(800);
+  // both file rows start collapsed: open each with the chevron left of its header (clicking the filename opens the file viewer instead).
+  // greeting.ts (lower row) first so opening it does not shift the farewell.ts header.
+  for (const name of ["src/greeting.ts", "src/farewell.ts"]) {
+    const box = await page.getByText(name, { exact: true }).first().boundingBox();
+    console.log(`FINDING ${name} header box: ${JSON.stringify(box)}`);
+    if (!box) throw new Error(`assertion failed: no header box for ${name}`);
+    await page.mouse.click(Math.max(2, box.x - 42), box.y + box.height / 2);
+    await page.waitForTimeout(900);
   }
   await expectText(page, /Goodbye/, "farewell.ts hunk content ('Goodbye') in the diff");
-  // greeting.ts is collapsed by default: open it through its row (text pierces the diff's shadow DOM)
-  if (!(await page.getByText(/Welcome aboard/).first().isVisible().catch(() => false))) {
-    await page.getByText("src/greeting.ts", { exact: true }).first().click().catch(() => {});
-    await page.waitForTimeout(800);
-  }
-  const welcome = await page.getByText(/Welcome aboard/).first().isVisible().catch(() => false);
-  console.log(`FINDING greeting.ts hunk expanded ('Welcome aboard' visible): ${welcome}`);
+  await expectText(page, /Welcome aboard/, "greeting.ts hunk content ('Welcome aboard') in the diff");
   await page.waitForTimeout(700);
   await shot("diff-expanded");
   const info = await dumpPage(page, "s06 diff panel");
-  console.log(`FINDING diff mentions greeting.ts: ${/greeting\.ts/.test(info.text)} farewell.ts: ${/farewell\.ts/.test(info.text)} welcome-line: ${/Welcome aboard/.test(await bodyText(page))}`);
+  console.log(`FINDING diff panel text mentions greeting.ts: ${/greeting\.ts/.test(info.text)} farewell.ts: ${/farewell\.ts/.test(info.text)}`);
 }
