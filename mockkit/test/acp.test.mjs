@@ -266,3 +266,45 @@ test("hold names are sanitized (no path traversal)", () => {
   assert.ok(!safeName("..").startsWith("."));
   assert.equal(safeName("rec"), "rec");
 });
+
+test("exit-plan scenario sends an _x.ai/exit_plan_mode request with the plan markdown", async () => {
+  const c = client();
+  const sid = await session(c);
+  const done = c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:exit-plan]") });
+  const req = await c.waitFor((f) => f.method === "_x.ai/exit_plan_mode");
+  assert.equal(req.params.method, "x.ai/exit_plan_mode");
+  assert.equal(req.params.params.sessionId, sid);
+  assert.match(req.params.params.planContent, /^# Refactor the greeting helper/);
+  c.send({ id: req.id, result: { outcome: "abandoned", feedback: "captured" } });
+  const r = await done;
+  assert.equal(r.result.stopReason, "end_turn");
+  assert.match(text(c.frames), /plan is ready for your review/);
+  c.close();
+});
+
+test("approval-deny: rejecting runs onReject and never executes the command", async () => {
+  const c = client();
+  const sid = await session(c);
+  mkdirSync(join(c.cwd, "dist"));
+  writeFileSync(join(c.cwd, "dist/keep.txt"), "x");
+  const done = c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:approval-deny]") });
+  const req = await c.waitFor((f) => f.method === "session/request_permission");
+  assert.equal(req.params.toolCall.kind, "execute");
+  c.send({ id: req.id, result: { outcome: { outcome: "selected", optionId: "reject-once" } } });
+  assert.equal((await done).result.stopReason, "end_turn");
+  assert.match(text(c.frames), /leave `dist` untouched/);
+  assert.equal(readFileSync(join(c.cwd, "dist/keep.txt"), "utf8"), "x"); // rm never ran
+  c.close();
+});
+
+test("todo scenario starts with a six-entry plan (first entry in progress)", async () => {
+  const c = client();
+  const sid = await session(c);
+  const done = c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:todo]") });
+  const plan = await c.waitFor((f) => f.method === "session/update" && f.params.update.sessionUpdate === "plan");
+  assert.equal(plan.params.update.entries.length, 6);
+  assert.equal(plan.params.update.entries[0].status, "in_progress");
+  c.send({ method: "session/cancel", params: { sessionId: sid } });
+  assert.equal((await done).result.stopReason, "cancelled");
+  c.close();
+});

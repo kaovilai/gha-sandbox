@@ -12,16 +12,13 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(1200);
   await shot("picker-open");
   await dumpPage(page, "s20 picker (keyboard)");
-  const alt = page.getByText("Mock Alt", { exact: false }).first();
-  if (!(await alt.isVisible().catch(() => false))) {
-    // fall back to the composer button
-    await page.keyboard.press("Escape");
-    await page.locator("button").filter({ hasText: /Mock (Build|Fast)/ }).last().click();
-    await page.waitForTimeout(1200);
-    await shot("picker-open-click");
-  }
-  await must(page, page.getByText("Mock Alt", { exact: false }), "Mock Alt provider in picker");
-  await page.getByText("Mock Alt", { exact: false }).first().click();
+  // provider rail of the picker: one icon button per instance (aria-label = display name)
+  const altBtn = page.getByRole("button", { name: "Mock Alt" }).first();
+  await must(page, altBtn, "Mock Alt provider button in picker");
+  await altBtn.hover();
+  await page.waitForTimeout(800);
+  await shot("picker-alt-hover");
+  await altBtn.click();
   await page.waitForTimeout(1000);
   await shot("picker-alt-selected");
   await dumpPage(page, "s20 alt selected");
@@ -32,6 +29,7 @@ export default async function ({ page, shot, env }) {
   }
   await page.keyboard.press("Escape");
   await composerEditor(page).click();
+  await shot("composer-after-switch");
   await sendPrompt(page, "Now answer from the other provider.");
   await page.getByText(/Mock agent, turn/).nth(1).waitFor({ timeout: 90_000 });
   await page.waitForTimeout(1200);

@@ -11,6 +11,8 @@ export default async function ({ page, shot, env }) {
   const ws = env.MOCKKIT_WS;
   const bare = join(env.MOCKKIT_ROOT, "remote.git");
   git(env.MOCKKIT_ROOT, "init", "-q", "--bare", "-b", "main", bare);
+  git(ws, "config", "user.name", "Mock User"); // the runner has no git identity; T3 commits inside this repo
+  git(ws, "config", "user.email", "mock@example.invalid");
   git(ws, "remote", "add", "origin", bare);
   git(ws, "push", "-q", "-u", "origin", "main");
   console.log(`remote head before: ${git(ws, "ls-remote", "origin", "main")}`);

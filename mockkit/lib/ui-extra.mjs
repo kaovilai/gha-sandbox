@@ -35,7 +35,26 @@ export function seedInstances(env, instances) {
   console.log(`seeded extra instances into ${file}: ${Object.keys(instances).join(",")}`);
 }
 
-export const gotoPath = async (page, path) => {
+// Add an acpRegistry (local command) instance running upstream apps/server/scripts/acp-mock-agent.ts from the target checkout
+// (needs its node_modules; run with --experimental-strip-types). `flags` = T3_ACP_* env vars, e.g. { T3_ACP_EMIT_XAI_RATE_LIMIT_THEN_HANG: "1" }.
+export function seedUpstreamAcp(env, id, displayName, flags = {}) {
+  const file = join(env.MOCKKIT_STATE, "settings.json");
+  const settings = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  const agent = join(process.env.MOCKKIT_TARGET, "apps/server/scripts/acp-mock-agent.ts");
+  if (!existsSync(agent)) throw new Error(`upstream mock agent missing: ${agent}`);
+  settings.providerInstances = settings.providerInstances ?? {};
+  settings.providerInstances[id] = {
+    driver: "acpRegistry",
+    displayName,
+    enabled: true,
+    environment: Object.entries(flags).map(([name, value]) => ({ name, value: String(value) })),
+    config: { source: "local", commandPath: process.execPath, commandArgs: ["--experimental-strip-types", "--no-warnings", agent] },
+  };
+  writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
+  console.log(`seeded upstream acp instance ${id} (${displayName}) -> ${agent}; node ${process.version}`);
+}
+
+export const gotoPath =async (page, path) => {
   await page.goto(new URL(path, page.url()).href, { waitUntil: "load" });
   await page.waitForTimeout(1500);
 };

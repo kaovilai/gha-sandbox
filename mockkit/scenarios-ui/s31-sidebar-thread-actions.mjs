@@ -31,7 +31,7 @@ export default async function ({ page, shot, env }) {
   await shot("three-threads");
   await dumpPage(page, "s31 three threads");
 
-  const row = (title) => page.getByText(title, { exact: false }).first();
+  const row = (title) => page.locator("[data-thread-item]").filter({ hasText: title }).first();
   const openMenu = async (title) => {
     await row(title).click({ button: "right" });
     await page.waitForTimeout(700);

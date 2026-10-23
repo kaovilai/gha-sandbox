@@ -12,6 +12,7 @@
 //   {permission:{tool,action?,onAllow?,onReject?}}   ask the user; run action+onAllow or onReject
 //   {ask:{questions,then?}}              ask the user questions; then(answers) -> steps
 //   {plan:{entries}}                     plan/todo list update
+//   {exitPlan:{planContent}}             xAI exit_plan_mode request: T3 captures planContent into a ProposedPlanCard
 //   {error:{message,code?}}              fail the turn
 //   {hold:{name}}                        block until $MOCK_CONTROL_DIR/release/<name> exists
 //   {sleep:{ms}}                         sleep
@@ -42,6 +43,7 @@ export const S = {
   permission: (o) => ({ permission: o }),
   ask: (o) => ({ ask: o }),
   plan: (entries) => ({ plan: { entries } }),
+  exitPlan: (planContent) => ({ exitPlan: { planContent } }),
   error: (message, code) => ({ error: { message, code } }),
   hold: (name) => ({ hold: { name } }),
   sleep: (ms) => ({ sleep: { ms } }),
@@ -178,6 +180,11 @@ export async function runSteps(stepsIn, sink, ctx) {
       case "plan":
         sink.plan(a.entries);
         break;
+      case "exitPlan": {
+        const res = await sink.exitPlan({ planContent: a.planContent });
+        log?.("exitPlan", { outcome: res?.outcome });
+        break;
+      }
       case "error":
         throw new ScenarioError(a.message, a.code);
       case "hold":

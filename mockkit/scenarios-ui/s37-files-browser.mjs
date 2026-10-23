@@ -37,11 +37,21 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(1500);
   await shot("files-tree");
   await dumpPage(page, "s37 files tree");
-  const open = async (name, tag) => {
-    const row = page.getByText(name, { exact: true }).first();
-    await must(page, row, `tree row ${name}`);
-    await row.click();
-    await page.waitForTimeout(1500);
+  // Open a file: click its tree row when it is clickable, else fall back to the Ctrl+P file picker (full relative path).
+  const open = async (name, tag, relPath) => {
+    let how = "tree";
+    try {
+      await page.getByText(name, { exact: true }).first().click({ timeout: 5000 });
+    } catch {
+      how = "file-picker";
+      await page.keyboard.press("Control+P");
+      await must(page, page.locator("input:visible").last(), "file picker input");
+      await page.keyboard.type(relPath, { delay: 40 });
+      await page.waitForTimeout(1200);
+      await page.keyboard.press("Enter");
+    }
+    console.log(`opened ${relPath} via ${how}`);
+    await page.waitForTimeout(2000);
     await shot(tag);
   };
   const failures = [];
@@ -57,22 +67,22 @@ export default async function ({ page, shot, env }) {
     await page.getByText("src", { exact: true }).first().click();
     await page.waitForTimeout(800);
   });
-  await step("source preview", () => open("greeting.ts", "preview-source"));
+  await step("source preview", () => open("greeting.ts", "preview-source", "src/greeting.ts"));
   await step("expand docs", async () => {
     await page.getByText("docs", { exact: true }).first().click();
     await page.waitForTimeout(800);
   });
-  await step("markdown preview", () => open("guide.md", "preview-markdown"));
+  await step("markdown preview", () => open("guide.md", "preview-markdown", "docs/guide.md"));
   await step("expand data", async () => {
     await page.getByText("data", { exact: true }).first().click();
     await page.waitForTimeout(800);
   });
-  await step("csv preview", () => open("people.csv", "preview-csv"));
+  await step("csv preview", () => open("people.csv", "preview-csv", "data/people.csv"));
   await step("expand assets", async () => {
-    await page.getByText("assets", { exact: true }).first().click();
+    await page.getByText("assets", { exact: true }).first().click({ timeout: 5000 });
     await page.waitForTimeout(800);
   });
-  await step("image preview", () => open("logo.svg", "preview-image"));
+  await step("image preview", () => open("logo.svg", "preview-image", "assets/logo.svg"));
   await dumpPage(page, "s37 final");
   if (failures.length) throw new Error(`file previews failed: ${failures.join(", ")}`);
 }
