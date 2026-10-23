@@ -244,7 +244,7 @@ Every server request T3 answers and every notification it consumes, with what th
 | `mcpToolCall.mcpAppUi` + `mcpServer/resource/read` (MCP app frame) | `ui://` HTML served with mime `text/html;profile=mcp-app`; `mcpServer/tool/call` answers ok | `S.mcpApp` / `mcp-app` | s58 |
 | `execCommandApproval`, `applyPatchApproval` (legacy) | `MOCK_CODEX_LEGACY_APPROVALS=1` | `S.permission` unchanged | unit test only |
 
-Run: `-f scenarios=codex-extra` (or `codex,codex-extra`; CI runs 40002719710 + 40010846438 + 40012921438: all 10 extra drivers ok; of the existing 17, 16 ok in the pack run and s21 passes alone but failed in two pack runs right after s20, an order-dependent add-project flake that predates this track and also hit another branch's run). Verified in CI (screenshots read), what T3 really shows:
+Run: `-f scenarios=codex-extra` (or `codex,codex-extra`; CI runs 40002719710 + 40010846438 + 40012921438: all 10 extra drivers ok; s21 failed in two pack runs: root cause = T3 `openAddProjectFlow` navigates to /settings/connections when no environment is connected yet, so after s21's `page.reload` the project path was typed into the settings search box; `addProject` in `lib/ui.mjs` now detects the Settings landing and retries; full `codex,codex-extra` run 40013945776 = 27/27 ok incl. s21, retry fired once). Verified in CI (screenshots read), what T3 really shows:
 
 * **s50** "App access approval" + connector name, Decline / Approve and an overflow menu (Cancel, Always allow this session, Always allow). The persist choices are only in the `...` menu.
 * **s51** renders as "File change approval" with the `reason` text; the granted paths are NOT shown. Granting lets the write happen (`dist/build.log`).
