@@ -44,8 +44,16 @@ fi
 
 dump() {
   if [ "$plat" = android ]; then
-    adb shell uiautomator dump /sdcard/uia.xml >/dev/null 2>&1
-    adb exec-out cat /sdcard/uia.xml 2>/dev/null
+    # uiautomator cannot reach "idle" while the app animates/streams and then leaves the PREVIOUS dump on disk:
+    # delete first, retry, and fail (empty) rather than return a stale tree.
+    local i x
+    for i in 1 2 3; do
+      adb shell "rm -f /sdcard/uia.xml; uiautomator dump /sdcard/uia.xml" >/dev/null 2>&1
+      x=$(adb exec-out cat /sdcard/uia.xml 2>/dev/null)
+      [ -n "$x" ] && { printf '%s\n' "$x"; return 0; }
+      sleep 1
+    done
+    return 1
   else
     axe describe-ui --udid "$UDID" 2>/dev/null
   fi
@@ -139,6 +147,17 @@ start_thread() { # <title> <prompt> -> threadId
   return 1
 }
 next() { node "$kit/ctl/mockctl.mjs" next "$@" --cwd "$ws"; }
+# wait_server <threadId> <regex> <timeoutSec>: poll `thread show --json` until the assistant text matches
+wait_server() {
+  local t0=$SECONDS j
+  while (( SECONDS - t0 < $3 )); do
+    j=$(show_json "$1" | grep '^{' | head -1)
+    if [ -n "$j" ] && echo "$j" | jq -r '[.messages[]|select(.role=="assistant")|.text]|join("\n")' | grep -Eq "$2"; then return 0; fi
+    sleep 2
+  done
+  log "timeout waiting for server text /$2/ on $1"
+  return 1
+}
 
 navs=0
 open_thread() { # <title>
@@ -189,24 +208,31 @@ run_s40() {
   shot s40-turn-open-before-stream
   server_truth s40-before-stream "$tid"
   node "$kit/ctl/mockctl.mjs" release g40
-  # growth: the step lines must appear one after another in the UI tree
-  wait_ui "Step 1 of 8" 60 s40-step1 >/dev/null || { rec_stop s40; return 1; }
+  # While text streams in, uiautomator cannot get an idle tree (see dump()), so growth is proven by timed
+  # screenshots + server-side assistant text; the UI tree is asserted at the quiescent held/complete states.
+  sleep 5
   shot s40-streaming-early
-  ui_state s40-early
-  wait_ui "Step 5 of 8" 90 s40-step5 >/dev/null || { rec_stop s40; return 1; }
+  server_truth s40-early "$tid"
+  local early_text=$SRV_TEXT
+  sleep 4
+  shot s40-streaming-mid
+  wait_server "$tid" "Step 5 of 8" 90 || { rec_stop s40; return 1; }
   node "$kit/ctl/mockctl.mjs" wait-reached live40 60 || log "hold live40 not reached"
-  sleep 2
+  sleep 3
   shot s40-streaming-held
   ui_state s40-held
   server_truth s40-held "$tid"
   local held_status=$SRV_STATUS
+  echo "$early_text" | grep -q "Step 5 of 8" && log "UNEXPECTED: step 5 already streamed at the early shot"
+  wait_ui "Step 5 of 8" 30 s40-held-ui >/dev/null || { rec_stop s40; return 1; }
   # mid-turn means: UI has step 5 but not step 6, and the server still has the run open
   node "$uia" find "Step 6 of 8" < "$out/ui/s40-held.dump" >/dev/null && log "UNEXPECTED: step 6 visible while held"
   node "$kit/ctl/mockctl.mjs" release live40
-  wait_ui "Live stream complete" 90 s40-done >/dev/null || { rec_stop s40; return 1; }
-  sleep 2
+  wait_server "$tid" "Live stream complete" 90 || { rec_stop s40; return 1; }
+  sleep 4
   shot s40-complete
   ui_state s40-complete
+  wait_ui "Live stream complete" 30 s40-done >/dev/null || { rec_stop s40; return 1; }
   server_truth s40-complete "$tid"
   rec_stop s40
   log "s40 server status held=$held_status final=$SRV_STATUS"
@@ -236,8 +262,8 @@ run_s41() {
   ui_state s41-pending
   server_truth s41-pending "$tid"
   [ -e "$ws/NOTES.md" ] && log "UNEXPECTED: NOTES.md exists before approval"
-  tap_re "^Allow once$" 20 s41-allow || { rec_stop s41; return 1; }
-  wait_ui "was written|Approved|Changed files" 90 s41-resolved >/dev/null || { rec_stop s41; return 1; }
+  tap_re "^Approve$" 20 s41-approve || { rec_stop s41; return 1; }
+  wait_server "$tid" "Approved" 90 || { shot s41-no-resolution; rec_stop s41; return 1; }
   sleep 4
   shot s41-approval-resolved
   ui_state s41-resolved
