@@ -13,7 +13,7 @@
 //   {ask:{questions,then?}}              ask the user questions; then(answers) -> steps
 //   {plan:{entries}}                     plan/todo list update
 //   {exitPlan:{planContent}}             xAI exit_plan_mode request: T3 captures planContent into a ProposedPlanCard
-//   {error:{message,code?}}              fail the turn
+//   {error:{message,code?,kind?}}        fail the turn (kind "usage_limit" = Codex Limited state)
 //   {hold:{name}}                        block until $MOCK_CONTROL_DIR/release/<name> exists
 //   {sleep:{ms}}                         sleep
 //
@@ -25,10 +25,11 @@ import { hold as holdGate } from "./hold.mjs";
 import { abortError, sleep } from "./pace.mjs";
 
 export class ScenarioError extends Error {
-  constructor(message, code = -32603) {
+  constructor(message, code = -32603, kind = undefined) {
     super(message);
     this.name = "ScenarioError";
     this.code = code;
+    this.kind = kind; // optional adapter hint: "usage_limit" (Codex renders the Limited state)
   }
 }
 
@@ -44,7 +45,7 @@ export const S = {
   ask: (o) => ({ ask: o }),
   plan: (entries) => ({ plan: { entries } }),
   exitPlan: (planContent) => ({ exitPlan: { planContent } }),
-  error: (message, code) => ({ error: { message, code } }),
+  error: (message, code, kind) => ({ error: { message, code, kind } }),
   hold: (name) => ({ hold: { name } }),
   sleep: (ms) => ({ sleep: { ms } }),
 };
@@ -186,7 +187,7 @@ export async function runSteps(stepsIn, sink, ctx) {
         break;
       }
       case "error":
-        throw new ScenarioError(a.message, a.code);
+        throw new ScenarioError(a.message, a.code, a.kind);
       case "hold":
         await holdGate(a.name, { env: ctx.env, signal, log });
         break;

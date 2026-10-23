@@ -1,9 +1,26 @@
 // S14 usage limit: grok-driver instance backed by the UPSTREAM acp-mock-agent.ts with T3_ACP_EMIT_XAI_RATE_LIMIT_THEN_HANG=1.
 // Whether T3 renders the "Usage limit reached" recovery UI for this frame is asserted, not assumed: the driver fails if it is not seen.
-import { composerEditor, dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
+import { ask, composerEditor, dumpPage, providerOf, sendPrompt, startSession } from "../lib/ui.mjs";
 import { pickInstance, seedUpstreamGrok } from "../lib/ui-extra.mjs";
 
 export default async function ({ page, shot, env }) {
+  if (providerOf(env) === "codex") {
+    // Codex flavor: the mock fails the turn with codexErrorInfo usageLimitExceeded + account/rateLimits/updated (scenario usage-limit).
+    await startSession(page, env);
+    await shot("ready");
+    await ask(page, env, "usage-limit", "Please keep working on the migration.");
+    const banner = page.getByText(/usage limit/i).first();
+    try {
+      await banner.waitFor({ state: "visible", timeout: 60_000 });
+    } catch (e) {
+      await dumpPage(page, "s14 codex: no usage-limit UI");
+      throw e;
+    }
+    await page.waitForTimeout(2000);
+    await shot("usage-limit");
+    await dumpPage(page, "s14 codex usage limit");
+    return;
+  }
   seedUpstreamGrok(env, "grok_usage", "Upstream (usage limit)", { T3_ACP_EMIT_XAI_RATE_LIMIT_THEN_HANG: "1" });
   await startSession(page, env);
   await page.waitForTimeout(8000); // hot reload + probes

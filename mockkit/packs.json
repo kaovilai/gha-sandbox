@@ -40,6 +40,28 @@
     "s03-markdown-stream",
     "s17-multi-turn-context"
   ],
+  "codex": [
+    "s03-markdown-stream",
+    "s04-reasoning-then-answer",
+    "s05-tool-read-search",
+    "s06-edit-file-diff",
+    "s07-shell-command-output",
+    "s08-approval-allow",
+    "s09-approval-deny",
+    "s10-user-question",
+    "s11-plan-todo",
+    "s13-error-turn",
+    "s14-usage-limit",
+    "s15-interrupt-cancel",
+    "s17-multi-turn-context",
+    "s18-provider-status-matrix",
+    "s20-model-picker-switch",
+    "s24-git-commit-push"
+  ],
+  "codex-smoke": [
+    "s03-markdown-stream",
+    "s17-multi-turn-context"
+  ],
   "explore": [
     "s00-explore"
   ],

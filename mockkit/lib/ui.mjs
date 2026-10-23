@@ -71,23 +71,34 @@ export async function addProject(page, wsPath, { shot } = {}) {
   return name;
 }
 
+// Which mock provider a driver runs against: env.MOCKKIT_PROVIDER = grok (default) | codex (set per scenario by scenario.mjs).
+export const providerOf = (env) => (env?.MOCKKIT_PROVIDER === "codex" ? "codex" : "grok");
+
 // Start a fresh thread in the project and make sure the composer targets the mock model. Polls until the mock
-// provider is selectable (READY); fails loudly when it never shows up.
-export async function newMockThread(page, { project, shot } = {}) {
+// provider is selectable (READY); fails loudly when it never shows up. provider "codex" = the Codex-driver mock
+// (models gpt-6-astra / gpt-6-luna / gpt-5.6-sol, shown by T3 as "GPT-6-Astra" ...).
+export async function newMockThread(page, { project, shot, provider = "grok" } = {}) {
   await page.getByRole("button", { name: `New thread in ${project}` }).first().click();
   await composerEditor(page).waitFor({ state: "visible", timeout: 30_000 });
+  const codex = provider === "codex";
+  const wantLabel = codex ? /gpt-6-astra|gpt-6-luna|gpt-5\.6-sol/i : /Mock/i;
   const pickerLoc = () => page.locator("button").filter({ hasText: /Mock (Build|Fast)|gpt-|claude|opus|sonnet|grok/i }).last();
   const deadline = Date.now() + 90_000;
   let label = "";
   while (Date.now() < deadline) {
     label = ((await pickerLoc().textContent({ timeout: 2000 }).catch(() => "")) ?? "").trim();
-    if (/Mock/i.test(label)) {
+    if (wantLabel.test(label)) {
       console.log(`composer model picker: "${label}"`);
       return;
     }
     if (label) {
       await pickerLoc().click().catch(() => {});
-      const opt = page.getByText("Mock Build", { exact: false }).first();
+      if (codex) {
+        // provider rail: one icon button per instance (aria-label = display name)
+        const rail = page.getByRole("button", { name: /^Codex$/i }).first();
+        if (await rail.isVisible({ timeout: 1500 }).catch(() => false)) await rail.click().catch(() => {});
+      }
+      const opt = codex ? page.getByText(/GPT-6-Astra/i).last() : page.getByText("Mock Build", { exact: false }).first();
       if (await opt.isVisible({ timeout: 1500 }).catch(() => false)) {
         await shot?.("model-picker");
         await opt.click();
@@ -99,7 +110,7 @@ export async function newMockThread(page, { project, shot } = {}) {
     await page.waitForTimeout(1000);
   }
   await dumpPage(page, "model picker (mock never selectable)");
-  throw new Error(`mock provider never became selectable in the composer (picker label: "${label}")`);
+  throw new Error(`mock ${provider} provider never became selectable in the composer (picker label: "${label}")`);
 }
 
 export async function waitText(page, matcher, timeout = 60_000) {
@@ -109,7 +120,7 @@ export async function waitText(page, matcher, timeout = 60_000) {
 // Fresh mock-backed thread inside this scenario's own workspace project (env.MOCKKIT_WS; one server per scenario).
 export async function startSession(page, env) {
   const project = await addProject(page, env.MOCKKIT_WS);
-  await newMockThread(page, { project });
+  await newMockThread(page, { project, provider: providerOf(env) });
   return project;
 }
 

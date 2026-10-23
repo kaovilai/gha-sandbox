@@ -8,7 +8,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const LAUNCHER = resolve(here, "../bin/mock-cli.sh");
 
 // Merge extra grok-driver provider instances into the running server's settings.json (hot-reloaded by T3).
-//   instances: { <instanceId>: { displayName, mode?: ready|unauth|old|broken|missing, binaryPath?, enabled?, accentColor? } }
+//   instances: { <instanceId>: { displayName, driver?: "grok"(default)|"codex", mode?: ready|unauth|old|broken|missing, binaryPath?, enabled?, accentColor? } }
 export function seedInstances(env, instances) {
   const file = join(env.MOCKKIT_STATE, "settings.json");
   const settings = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
@@ -23,11 +23,11 @@ export function seedInstances(env, instances) {
   settings.providerInstances = settings.providerInstances ?? {};
   for (const [id, o] of Object.entries(instances)) {
     settings.providerInstances[id] = {
-      driver: "grok",
+      driver: o.driver ?? "grok",
       ...(o.displayName ? { displayName: o.displayName } : {}),
       ...(o.accentColor ? { accentColor: o.accentColor } : {}),
       enabled: o.enabled ?? true,
-      environment: Object.entries({ ...base, MOCK_CLI_MODE: o.mode ?? "ready", ...(o.env ?? {}) }).map(([name, value]) => ({ name, value: String(value) })),
+      environment: Object.entries({ ...base, MOCK_CLI_MODE: o.mode ?? "ready", ...(o.driver === "codex" ? { MOCK_CLI_FLAVOR: "codex" } : {}), ...(o.env ?? {}) }).map(([name, value]) => ({ name, value: String(value) })),
       config: { binaryPath: o.binaryPath ?? LAUNCHER },
     };
   }

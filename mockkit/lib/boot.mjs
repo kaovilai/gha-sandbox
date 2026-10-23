@@ -120,12 +120,12 @@ export async function bootT3({ id, target = process.env.MOCKKIT_TARGET, tmp = pr
     console.log(`boot ${id}: stateDir=${state}`);
     if (state !== join(home, "userdata")) seed(state);
 
-    // provider readiness: T3 must have probed the mock CLI (`grok models`); the UI side then waits for the model picker.
+    // provider readiness: T3 must have probed the mock CLI (`grok models` / `codex app-server`); the UI side then waits for the model picker.
     await poll(
-      "T3 probed the mock provider (probes.log has `models`)",
+      "T3 probed the mock provider (probes.log has `models` or `app-server`)",
       () => {
         try {
-          return /\smodels\b/.test(readFileSync(join(ctl, "probes.log"), "utf8"));
+          return /\s(models|app-server)\b/.test(readFileSync(join(ctl, "probes.log"), "utf8"));
         } catch {
           return false;
         }

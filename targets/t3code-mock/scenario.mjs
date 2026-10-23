@@ -19,21 +19,27 @@ const tmp = process.env.RUNNER_TEMP || "/tmp";
 // ---- resolve SCENARIOS (ids | prefixes | packs) ----------------------------------------------------
 const drivers = readdirSync(uiDir).filter((f) => f.endsWith(".mjs")).map((f) => f.slice(0, -4)).sort();
 const packs = JSON.parse(readFileSync(join(here, "../../mockkit/packs.json"), "utf8"));
+// Provider per scenario: token suffix "@codex" / "@grok" (s03@codex), pack name starting with "codex" (packs.json "codex"),
+// or env MOCK_PROVIDER=codex|grok for everything; default grok. A driver may export
+// `meta.seed = { codex: "both" }` to seed more providers than it runs against (e.g. the model-picker driver).
+const labelOf = (e) => (e.prov === "codex" ? `codex-${e.id}` : e.id);
 function resolveIds(spec) {
-  const ids = [];
-  for (const tok of spec.split(",").map((s) => s.trim()).filter(Boolean)) {
+  const out = new Map();
+  for (const raw of spec.split(",").map((s) => s.trim()).filter(Boolean)) {
+    const [tok, atProv] = raw.split("@");
+    const prov = atProv || (/^codex/.test(tok) ? "codex" : process.env.MOCK_PROVIDER === "codex" ? "codex" : "grok");
     const list = packs[tok] ? (packs[tok] === "*" ? drivers : packs[tok]) : [tok];
     for (const t of list) {
       const hit = drivers.includes(t) ? [t] : drivers.filter((d) => d.startsWith(`${t}-`));
-      if (hit.length === 1) ids.push(hit[0]);
-      else ids.push(t); // unknown/ambiguous: reported as FAIL below
+      const e = { id: hit.length === 1 ? hit[0] : t, prov }; // unknown/ambiguous: reported as FAIL below
+      out.set(labelOf(e), e);
     }
   }
-  return [...new Set(ids)];
+  return [...out.values()];
 }
 const spec = (process.env.SCENARIOS || "").trim() || "s03-markdown-stream";
 const ids = resolveIds(spec);
-console.log(`scenarios (${spec}): ${ids.join(" ")}`);
+console.log(`scenarios (${spec}): ${ids.map(labelOf).join(" ")}`);
 
 mkdirSync(out, { recursive: true });
 const results = [];
@@ -68,7 +74,7 @@ function printMockFrames(mockLog, id) {
     const frames = readFileSync(mockLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
     const brief = frames.map((f) => {
       const fr = f.frame;
-      const what = fr ? (fr.method ?? (fr.error ? "error" : "result")) + (fr.params?.update?.sessionUpdate ? `:${fr.params.update.sessionUpdate}` : "") : f.raw ? f.raw.slice(0, 110) : (f.type ?? f.state ?? f.scenario ?? "");
+      const what = fr ? (fr.method ?? (fr.error ? "error" : "result")) + (fr.params?.update?.sessionUpdate ? `:${fr.params.update.sessionUpdate}` : "") + (fr.params?.item?.type ? `:${fr.params.item.type}` : "") : f.raw ? f.raw.slice(0, 110) : (f.type ?? f.state ?? f.scenario ?? "");
       return `${f.seq} ${f.dir} ${what}${f.queued ? " (queued)" : ""}`;
     });
     const prompts = frames.filter((f) => f.dir === "prompt").map((f) => `turn=${f.turn} scenario=${f.scenario} tag=${f.tag} queued=${f.queued}`);
@@ -78,22 +84,25 @@ function printMockFrames(mockLog, id) {
   }
 }
 
-for (const id of ids) {
-  const file = join(uiDir, `${id}.mjs`);
+for (const entry of ids) {
+  const id = labelOf(entry); // evidence file prefix ("codex-<driver>" for Codex runs)
+  const file = join(uiDir, `${entry.id}.mjs`);
   if (!existsSync(file)) {
     console.log(`RESULT ${id} FAIL (no driver ${file}; known: ${drivers.join(", ")}; packs: ${Object.keys(packs).join(", ")})`);
     results.push([id, false]);
     continue;
   }
   const mod = await import(pathToFileURL(file).href);
-  console.log(`::group::scenario ${id}`);
+  console.log(`::group::scenario ${id} (provider ${entry.prov})`);
   let ok = true;
   let srv;
   try {
+    // seed (settings.mjs) reads MOCK_PROVIDER: which mock providers are READY; the driver runs against entry.prov
+    process.env.MOCK_PROVIDER = mod.meta?.seed?.[entry.prov] ?? entry.prov;
     srv = await bootT3({ id });
     const { stateFile, origin } = await authenticate(srv, id, mod.meta?.firstRun === true);
     process.env.APP_URL = `${origin}/`;
-    const env = { ...process.env, MOCKKIT_WS: srv.ws, MOCKKIT_STATE: srv.state, MOCKKIT_ROOT: srv.root, MOCK_CONTROL_DIR: srv.ctl, MOCK_LOG: srv.mockLog };
+    const env = { ...process.env, MOCKKIT_PROVIDER: entry.prov, MOCKKIT_WS: srv.ws, MOCKKIT_STATE: srv.state, MOCKKIT_ROOT: srv.root, MOCK_CONTROL_DIR: srv.ctl, MOCK_LOG: srv.mockLog };
     await run(
       async ({ page, shot }) => {
         const sshot = (name, opts) => shot(`${id}-${name}`, opts);

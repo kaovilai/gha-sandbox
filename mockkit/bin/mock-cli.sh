@@ -1,5 +1,6 @@
 #!/bin/sh
-# Fake `grok` CLI launcher (what T3's grok driver spawns). Mirrors packages/provider-testing fakeCli.
+# Fake `grok` (and `codex`, see MOCK_CLI_FLAVOR below) CLI launcher. Mirrors packages/provider-testing fakeCli.
+#   codex flavor: codex app-server | exec ... | mcp list --json | --version -> bin/t3-mock-codex.mjs
 #   grok --version                       -> grok 1.0.13
 #   grok models                          -> login line + model bullets (parsed by status.ts)
 #   grok inspect --json                  -> {"skills":[]}
@@ -23,10 +24,21 @@ fi
 for a in "$@"; do
   case "$a" in
     --version)
+      if [ "${MOCK_CLI_FLAVOR:-}" = codex ]; then exec "$NODE" "$HERE/t3-mock-codex.mjs" "$@"; fi
       if [ "$MODE" = old ]; then echo "grok 0.0.1"; else echo "grok 1.0.13"; fi
       exit 0 ;;
   esac
 done
+
+# Codex flavor (T3's codex driver spawns `<binaryPath> app-server`, `exec ...`, `mcp list --json`): chosen by
+# MOCK_CLI_FLAVOR=codex (seeded on codex instances) or by those subcommands, which grok never receives.
+FLAVOR=${MOCK_CLI_FLAVOR:-}
+if [ -z "$FLAVOR" ]; then
+  for a in "$@"; do
+    case "$a" in app-server|exec|mcp) FLAVOR=codex ;; esac
+  done
+fi
+if [ "$FLAVOR" = codex ]; then exec "$NODE" "$HERE/t3-mock-codex.mjs" "$@"; fi
 
 case "$1" in
   models)
