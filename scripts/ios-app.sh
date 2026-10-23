@@ -32,8 +32,11 @@ perl -pi -e 's/const metroUrl = `http:\/\/\$\{metroHost\}:\$\{config\.metroPort\
 grep -q 'metroHost}:8200?' scripts/mobile-showcase.ts || echo "WARN: metroUrl proxy patch did not apply"
 node "$root/scripts/metro-manifest-proxy.mjs" > "$out/diag/proxy.log" 2>&1 &
 diag2=$!
-pnpm screenshots:mobile "${args[@]}" --keep-running 2>&1 | tee "$out/pass1.log"
-rc1=${PIPESTATUS[0]}
+# File redirect, not a pipe: --keep-running leaves Metro alive holding stdout, which would
+# keep `| tee` from ever seeing EOF.
+pnpm screenshots:mobile "${args[@]}" --keep-running > "$out/pass1.log" 2>&1
+rc1=$?
+tail -40 "$out/pass1.log" | cut -c1-200
 mkdir -p "$out/screenshots"
 cp -r artifacts/app-store/screenshots/apple/. "$out/screenshots/" 2>/dev/null || true
 
