@@ -99,14 +99,18 @@ export default async function ({ page, shot, env }) {
   // theme card: pick a named theme (the card's name button), it becomes the active one
   const labels = await page.locator('button[aria-label^="Use "]').evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
   console.log(`FINDING 'Use ...' buttons on the appearance page: ${JSON.stringify(labels)}`);
-  const card = page.getByRole("button", { name: /^Use Ocean( theme|,)/ }).first();
+  // the name button selects the whole theme; the active state is shown on the card's light/dark preview circles (aria-pressed)
+  const card = page.getByRole("button", { name: "Use Ocean theme", exact: true }).first();
   await card.scrollIntoViewIfNeeded();
+  const themeBefore = await page.evaluate(() => document.documentElement.dataset.themeId ?? null);
   await card.click();
   await page.waitForTimeout(1000);
-  const cardPressed = await card.getAttribute("aria-pressed");
-  const cardLabel = await card.getAttribute("aria-label");
-  console.log(`FINDING theme card: label=${JSON.stringify(cardLabel)} aria-pressed=${cardPressed}`);
-  if (cardPressed !== "true" || !/currently active/.test(cardLabel ?? "")) throw new Error(`assertion failed: Ocean theme card not active after click (aria-pressed=${cardPressed}, label=${cardLabel})`);
+  const themeAfter = await page.evaluate(() => document.documentElement.dataset.themeId ?? null);
+  const oceanDark = await pressed("Use Ocean dark mode");
+  const oceanLight = await pressed("Use Ocean light mode");
+  const defaultDark = await pressed("Use T3 Code dark mode");
+  console.log(`FINDING theme card: html[data-theme-id] ${themeBefore} -> ${themeAfter}; Ocean light/dark pressed=${oceanLight}/${oceanDark}; T3 Code dark pressed=${defaultDark}`);
+  if (oceanDark !== "true" || oceanLight !== "true" || defaultDark === "true") throw new Error(`assertion failed: Ocean is not the active theme after clicking its card (ocean light/dark pressed=${oceanLight}/${oceanDark}, T3 Code dark pressed=${defaultDark})`);
   await shot("theme-ocean-dark");
   if (failures.length) throw new Error(`settings sections failed: ${failures.join(", ")}`);
 }

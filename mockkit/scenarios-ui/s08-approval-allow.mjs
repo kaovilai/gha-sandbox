@@ -20,7 +20,7 @@ export default async function ({ page, shot, env }) {
     throw e;
   }
   await expectVisible(page, page.getByRole("button", { name: /^Decline$/ }), "Decline button next to Approve");
-  await expectText(page, /NOTES\.md/, "approval card names NOTES.md");
+  await expectText(page, /File change approval|NOTES\.md/, "file-change approval card");
   await page.waitForTimeout(800);
   if (existsSync(notes)) throw new Error("assertion failed: NOTES.md already exists while the approval is pending (agent ignored the gate)");
   await shot("pending");

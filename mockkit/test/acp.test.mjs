@@ -327,10 +327,10 @@ test("todo scenario starts with a six-entry plan (first entry in progress)", asy
   c.close();
 });
 
-test("background-task: tool call completes with a BackgroundTaskStarted ack, the turn ends, then _x.ai/task_completed reports the finished command", async () => {
+test("background-task kind=command: tool call completes with a BackgroundTaskStarted ack, the turn ends, then _x.ai/task_completed reports the finished command", async () => {
   const c = client();
   const sid = await session(c);
-  const r = await c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:background-task]") });
+  const r = await c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:background-task kind=command]") });
   assert.equal(r.result.stopReason, "end_turn"); // the turn is over while the task is still "pending" for T3
   const start = c.frames.find((f) => f.params?.update?.sessionUpdate === "tool_call" && f.params.update.rawInput?.background === true);
   assert.ok(start, "background tool_call");
@@ -370,5 +370,32 @@ test("context handoff preamble (provider switch mid-thread) is not quoted back: 
   const t = text(c.frames);
   assert.match(t, /You said: "Now answer from the other provider\."/);
   assert.doesNotMatch(t, /Context handoff|Provider context handoff/);
+  c.close();
+});
+
+test("background-task (default): persistent Monitor frames, turn ends, then _x.ai/task_completed reports the finished monitor", async () => {
+  const c = client();
+  const sid = await session(c);
+  const r = await c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:background-task]") });
+  assert.equal(r.result.stopReason, "end_turn"); // the turn is over while the task is still pending for T3
+  const start = c.frames.find((f) => f.params?.update?.sessionUpdate === "tool_call" && f.params.update.title === "monitor");
+  assert.ok(start, "monitor tool_call");
+  assert.equal(start.params.update._meta["x.ai/tool"].kind, "monitor");
+  const upd = c.frames.find((f) => f.params?.update?.rawInput?.variant === "Monitor");
+  assert.equal(upd.params.update.rawInput.persistent, true);
+  assert.equal(upd.params.update.rawInput.description, "Watch the dev server");
+  const bg = c.frames.find((f) => f.method === "_x.ai/task_backgrounded");
+  assert.ok(bg, "task_backgrounded");
+  assert.equal(bg.params.update.tool_call_id, start.params.update.toolCallId);
+  assert.equal(bg.params.update.monitor_description, "Watch the dev server");
+  const ack = c.frames.find((f) => f.params?.update?.rawOutput?.type === "Monitor");
+  assert.equal(ack.params.update.status, "completed");
+  assert.equal(ack.params.update.rawOutput.taskId, bg.params.update.task_id);
+  const done = await c.waitFor((f) => f.method === "_x.ai/task_completed");
+  assert.equal(done.params.update.task_snapshot.task_id, bg.params.update.task_id);
+  assert.equal(done.params.update.task_snapshot.kind, "monitor");
+  assert.equal(done.params.update.task_snapshot.exit_code, 0);
+  assert.match(done.params.update.task_snapshot.output, /dev server listening/);
+  assert.match(text(c.frames), /running in the background/);
   c.close();
 });

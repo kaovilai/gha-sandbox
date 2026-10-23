@@ -26,8 +26,9 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(2000);
   await shot("diff-panel");
   // the Diff panel lists both files; farewell.ts (new file) shows its added lines
-  await expectBody(page, /src\/farewell\.ts/, "diff panel row src/farewell.ts");
-  await expectBody(page, /src\/greeting\.ts/, "diff panel row src/greeting.ts");
+  // (the Diff panel renders in shadow DOM: text locators pierce it, body.innerText does not)
+  await expectText(page, "src/farewell.ts", "diff panel row src/farewell.ts");
+  await expectText(page, "src/greeting.ts", "diff panel row src/greeting.ts");
   await expectText(page, /Goodbye/, "farewell.ts hunk content ('Goodbye') in the diff");
   // expand the file rows to show the actual hunks (row chevron, not the filename: filename opens the file viewer)
   const chevrons = page.locator("button[aria-label^='Expand'], button[aria-label*='xpand file']");

@@ -1,6 +1,6 @@
 // S33 command palette tour: Ctrl+K command list, filter, "Go to file" (file search), "Search project contents" (grep).
 // Each phase asserts its own content: the action list, the filter narrowing it, a file hit, a content hit with the matching line.
-import { bodyText, dumpPage, expectBody, expectNoText, startSession } from "../lib/ui.mjs";
+import { bodyText, dumpPage, expectBody, expectNoText, expectVisible, startSession } from "../lib/ui.mjs";
 import { must } from "../lib/ui-extra.mjs";
 
 export default async function ({ page, shot, env }) {
@@ -10,7 +10,7 @@ export default async function ({ page, shot, env }) {
   const input = page.locator("input:visible").last();
   await must(page, input, "command palette input");
   await page.waitForTimeout(900);
-  await expectBody(page, /Search commands, projects, and threads/, "palette placeholder");
+  await expectVisible(page, page.getByPlaceholder(/Search commands, projects, and threads/), "palette input with its placeholder");
   for (const a of [/New thread in/, /Go to file/, /Search project contents/, /Add project/]) await expectBody(page, a, `palette action ${a}`);
   await shot("palette-open");
   await dumpPage(page, "s33 palette open");

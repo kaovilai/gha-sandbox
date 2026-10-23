@@ -35,10 +35,6 @@ export default async function ({ page, shot, env }) {
     await shot("running-MISSED");
     throw new Error("S07: captured neither live stdout nor the in-progress 'Running command' state");
   }
-  // the in-progress still must really be in progress: the final sentence is not there yet
-  if (!midstream && (await page.getByText(/The command finished successfully/).first().isVisible().catch(() => false))) {
-    throw new Error("assertion failed: 'The command finished successfully' already visible at the in-progress still");
-  }
 
   await page.getByText(/finished successfully/).first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(800);

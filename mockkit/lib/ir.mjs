@@ -14,8 +14,9 @@
 //   {plan:{entries}}                     plan/todo list update
 //   {exitPlan:{planContent}}             xAI exit_plan_mode request: T3 captures planContent into a ProposedPlanCard
 //   {error:{message,code?,kind?}}        fail the turn (kind "usage_limit" = Codex Limited state)
-//   {bgTask:{cmd,description?,until?}}   background shell: the tool call completes at once with an xAI `BackgroundTaskStarted` ack while the
-//                                        REAL `sh -c cmd` keeps running past the end of the turn; completion is reported when it exits (and the
+//   {bgTask:{cmd,description?,kind?,persistent?,until?}}  background task (xAI protocol): kind "command" (default) = tool call completes at
+//                                        once with a `BackgroundTaskStarted` ack, kind "monitor" (+ persistent) = Monitor tool + task_backgrounded.
+//                                        The REAL `sh -c cmd` keeps running past the end of the turn; completion is reported when it exits (and the
 //                                        optional hold gate `until` is released). ACP/Grok adapter only; others run it as a plain `sh` step.
 //   {hold:{name}}                        block until $MOCK_CONTROL_DIR/release/<name> exists
 //   {sleep:{ms}}                         sleep
@@ -146,7 +147,7 @@ export async function runSteps(stepsIn, sink, ctx) {
         const id = ctx.nextToolId();
         const taskId = a.taskId ?? `bg-${id}`;
         await sleep(pace.toolMs, signal);
-        const info = { id, taskId, cmd: a.cmd, description: a.description ?? a.cmd };
+        const info = { id, taskId, cmd: a.cmd, description: a.description ?? a.cmd, kind: a.kind ?? "command", persistent: a.persistent === true };
         sink.bgStart(info);
         // outlives the turn on purpose (no abort wiring: Stop must not kill it, process exit does)
         runShell(a.cmd, { ...ctx, signal: undefined }, () => {})
