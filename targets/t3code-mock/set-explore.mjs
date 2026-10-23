@@ -1,3 +1,3 @@
-// Scenario-set wrapper: workflow `scenario` input is a path, not env, so presets live in files.
-process.env.SCENARIOS ||= "s00-explore,s03-markdown-stream";
+// Preset: first vertical slice + the P0 drivers.
+process.env.SCENARIOS ||= "s03-markdown-stream,s06-edit-file-diff,s08-approval-allow,s13-error-turn";
 await import("./scenario.mjs");

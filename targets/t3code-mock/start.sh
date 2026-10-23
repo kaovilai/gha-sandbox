@@ -6,7 +6,7 @@ set -euo pipefail
 HARNESS=${GITHUB_WORKSPACE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 TMP=${RUNNER_TEMP:-/tmp}
 HOME_DIR="$TMP/t3home"
-WS="$TMP/mockws"
+WS="$TMP/demo-app"
 MK="$TMP/mockkit"
 mkdir -p "$MK"
 

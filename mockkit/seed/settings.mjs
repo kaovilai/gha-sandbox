@@ -31,6 +31,12 @@ const env = (extra = {}) =>
 const providerInstances = {
   grok: { driver: "grok", enabled: true, environment: env(), config: { binaryPath: launcher } },
 };
+// Real providers can never work keyless: disable them so no "Could not start Codex CLI" banner and the
+// model picker defaults to the mock. MOCK_KEEP_OTHER_PROVIDERS=1 leaves them as discovered.
+if (process.env.MOCK_KEEP_OTHER_PROVIDERS !== "1") {
+  providerInstances.codex = { driver: "codex", enabled: false };
+  providerInstances.claudeAgent = { driver: "claudeAgent", enabled: false };
+}
 
 mkdirSync(stateDir, { recursive: true });
 const settingsPath = join(stateDir, "settings.json");

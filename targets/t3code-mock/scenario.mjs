@@ -4,6 +4,8 @@
 import { existsSync, readFileSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { chromium } from "playwright";
+import { mkdirSync } from "node:fs";
 import { run } from "../../lib.mjs";
 import { dumpPage, skipOnboarding } from "../../mockkit/lib/ui.mjs";
 
@@ -12,6 +14,21 @@ const uiDir = join(here, "../../mockkit/scenarios-ui");
 const ids = (process.env.SCENARIOS || "s03-markdown-stream").split(",").map((s) => s.trim()).filter(Boolean);
 const out = process.env.OUT_DIR ?? "out";
 const results = [];
+
+// The pairing token is ONE-TIME: authenticate once, reuse the session (storageState) for every scenario.
+const stateFile = join(process.env.RUNNER_TEMP || "/tmp", "mockkit", "auth-state.json");
+mkdirSync(dirname(stateFile), { recursive: true });
+{
+  const b = await chromium.launch();
+  const c = await b.newContext();
+  const p = await c.newPage();
+  await p.goto(process.env.APP_URL, { waitUntil: "networkidle" });
+  await p.waitForTimeout(3000);
+  await c.storageState({ path: stateFile });
+  process.env.APP_URL = new URL(p.url()).origin + "/";
+  console.log(`authenticated; app origin ${new URL(p.url()).origin}`);
+  await b.close();
+}
 
 for (const id of ids) {
   const file = join(uiDir, `${id}.mjs`);
@@ -35,7 +52,7 @@ for (const id of ids) {
           throw e;
         }
       },
-      { viewport: mod.meta?.viewport ?? { width: 1440, height: 900 }, init: skipOnboarding },
+      { viewport: mod.meta?.viewport ?? { width: 1440, height: 900 }, init: skipOnboarding, storageState: stateFile },
     );
   } catch (e) {
     ok = false;
