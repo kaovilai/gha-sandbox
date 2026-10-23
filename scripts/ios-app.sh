@@ -38,6 +38,10 @@ node "$root/scripts/metro-manifest-proxy.mjs" > "$out/diag/proxy.log" 2>&1 &
 diag2=$!
 # Output goes to a file, not a pipe: with --keep-running, Metro stays alive holding stdout and
 # would keep `| tee` from ever seeing EOF.
+if [ "${IOS_LIVE:-0}" = 1 ]; then
+  # Live mock threads (mockkit): needs the kept servers/simulator; the coordinator must not pull the app back.
+  python3 "$root/scripts/patch-showcase-live.py" apps/mobile/src/features/showcase/ShowcaseCaptureCoordinator.tsx || echo "WARN: live-nav patch failed"
+fi
 if [ "${IOS_KEEP_RUNNING:-0}" = 1 ]; then
   pnpm screenshots:mobile "${args[@]}" --keep-running > "$out/pass1.log" 2>&1
   rc1=$?
@@ -59,7 +63,13 @@ tail -40 "$out/pass1.log" | cut -c1-200
 mkdir -p "$out/screenshots"
 cp -r artifacts/app-store/screenshots/apple/. "$out/screenshots/" 2>/dev/null || true
 
-if [ "$rc1" -eq 0 ] && [ "${IOS_KEEP_RUNNING:-0}" = 1 ]; then
+if [ "$rc1" -eq 0 ] && [ "${IOS_LIVE:-0}" = 1 ]; then
+  sroot=$(sed -n 's/^Showcase environments kept at \(.*\) (.*/\1/p' "$out/pass1.log" | tail -1)
+  echo "showcase root: $sroot"
+  LIVE_OUT="$out/live" LIVE_SCENARIOS="${LIVE_SCENARIOS:-s40 s41 s42}" bash "$root/scripts/mobile-live.sh" ios "$sroot" 2>&1 | tee "$out/live.log"
+  echo "mobile-live exit ${PIPESTATUS[0]}"
+  pkill -f 'apps/server/src/bin.ts serve' 2>/dev/null; pkill -f 'expo start' 2>/dev/null; true
+elif [ "$rc1" -eq 0 ] && [ "${IOS_KEEP_RUNNING:-0}" = 1 ]; then
   # Record a short clip from the still-running simulator while AXe scrolls the app.
   udid=$(xcrun simctl list devices booted -j | jq -r '[.devices[][] | select(.state=="Booted")][0].udid // empty')
   if [ -n "$udid" ]; then

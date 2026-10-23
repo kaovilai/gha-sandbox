@@ -19,6 +19,7 @@ export default {
   steps: (ctx) => {
     const line = (i) => S.say(`Step ${i + 1} of ${STEPS.length}: ${STEPS[i]}\n\n`, { chunk: 2, paceMs: 450 });
     return [
+      ...(ctx.args.gate ? [S.hold(ctx.args.gate)] : []),
       ...[0, 1, 2, 3, 4].map(line),
       S.hold(ctx.args.hold ?? "live"),
       ...[5, 6, 7].map(line),

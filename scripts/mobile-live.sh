@@ -144,7 +144,12 @@ navs=0
 open_thread() { # <title>
   local title=$1
   navs=$((navs + 1))
-  if [ "$navs" -eq 1 ]; then write_scene threads; else back; fi
+  if [ "$navs" -eq 1 ]; then
+    # fresh from the showcase pass the app sits on its fixture thread (scene=thread): toggle thread -> threads
+    write_scene thread; sleep 6; write_scene threads
+  else
+    back
+  fi
   if ! wait_ui "$title" 25 "list-$navs" >/dev/null; then
     log "list not showing '$title'; toggling scene thread -> threads"
     write_scene thread; sleep 8; write_scene threads
@@ -173,15 +178,21 @@ sleep 3
 # ---- scenarios ----------------------------------------------------------------------------------------------------
 run_s40() {
   local title="Mock live stream" tid
-  next live-stream hold=live40
+  next live-stream gate=g40 hold=live40
   rec_start s40
   tid=$(start_thread "$title" "Stream me a progress report.") || { rec_stop s40; return 1; }
   log "s40 thread $tid"
   echo "$tid" > "$out/s40.threadid"
   open_thread "$title" || { rec_stop s40; return 1; }
+  node "$kit/ctl/mockctl.mjs" wait-reached g40 60 || log "gate g40 not reached"
+  sleep 2
+  shot s40-turn-open-before-stream
+  server_truth s40-before-stream "$tid"
+  node "$kit/ctl/mockctl.mjs" release g40
   # growth: the step lines must appear one after another in the UI tree
-  wait_ui "Step 2 of 8" 90 s40-step2 >/dev/null || { rec_stop s40; return 1; }
+  wait_ui "Step 1 of 8" 60 s40-step1 >/dev/null || { rec_stop s40; return 1; }
   shot s40-streaming-early
+  ui_state s40-early
   wait_ui "Step 5 of 8" 90 s40-step5 >/dev/null || { rec_stop s40; return 1; }
   node "$kit/ctl/mockctl.mjs" wait-reached live40 60 || log "hold live40 not reached"
   sleep 2
@@ -199,32 +210,42 @@ run_s40() {
   server_truth s40-complete "$tid"
   rec_stop s40
   log "s40 server status held=$held_status final=$SRV_STATUS"
-  [ -n "$held_status" ] && echo "$SRV_TEXT" | grep -q "Live stream complete"
+  [ "$held_status" = running ] && echo "$SRV_TEXT" | grep -q "Live stream complete"
 }
 
 run_s41() {
   local title="Mock approval" tid
-  next approval-allow
+  next live-approval gate=g41
   rec_start s41
   tid=$(start_thread "$title" "Please write a notes file.") || { rec_stop s41; return 1; }
   log "s41 thread $tid"
   echo "$tid" > "$out/s41.threadid"
   open_thread "$title" || { rec_stop s41; return 1; }
-  wait_ui "Approval needed|Allow once" 120 s41-card >/dev/null || { rec_stop s41; return 1; }
+  node "$kit/ctl/mockctl.mjs" wait-reached g41 60 || log "gate g41 not reached"
+  sleep 2
+  node "$kit/ctl/mockctl.mjs" release g41
+  if ! wait_ui "Approval needed|Allow once" 45 s41-card >/dev/null; then
+    log "approval card not in UI tree; recording server truth, then remount (BACK, reopen)"
+    shot s41-card-missing
+    server_truth s41-card-missing "$tid"
+    open_thread "$title" || { rec_stop s41; return 1; }
+    wait_ui "Approval needed|Allow once" 45 s41-card2 >/dev/null || { shot s41-card-missing2; server_truth s41-card-missing2 "$tid"; rec_stop s41; return 1; }
+  fi
   sleep 2
   shot s41-approval-pending
   ui_state s41-pending
   server_truth s41-pending "$tid"
   [ -e "$ws/NOTES.md" ] && log "UNEXPECTED: NOTES.md exists before approval"
   tap_re "^Allow once$" 20 s41-allow || { rec_stop s41; return 1; }
-  wait_ui "was written|Approved" 90 s41-resolved >/dev/null || { rec_stop s41; return 1; }
-  sleep 3
+  wait_ui "was written|Approved|Changed files" 90 s41-resolved >/dev/null || { rec_stop s41; return 1; }
+  sleep 4
   shot s41-approval-resolved
   ui_state s41-resolved
   server_truth s41-resolved "$tid"
   rec_stop s41
   local ok=1
   [ -e "$ws/NOTES.md" ] && log "SERVER-SIDE: $ws/NOTES.md exists: $(head -c 80 "$ws/NOTES.md" | tr '\n' ' ')" || { log "NOTES.md missing"; ok=0; }
+  echo "$SRV_TEXT" | grep -q "Approved" || { log "assistant text lacks Approved"; ok=0; }
   [ "$ok" = 1 ]
 }
 
@@ -245,7 +266,7 @@ run_s42() {
   sleep 1
   shot s42-question-selected
   tap_re "^Submit answers$" 15 s42-submit || { rec_stop s42; return 1; }
-  wait_ui "going with" 90 s42-answered >/dev/null || { rec_stop s42; return 1; }
+  wait_ui "Worked for|Strict \(Recommended\)$" 90 s42-answered >/dev/null || { rec_stop s42; return 1; }
   sleep 2
   shot s42-question-answered
   ui_state s42-answered
