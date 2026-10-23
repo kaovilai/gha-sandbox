@@ -105,9 +105,12 @@ export async function bootDesktop({
         process.kill(-child.pid, "SIGKILL");
       } catch {}
     }
-    spawnSync("pkill", ["-f", "--", `T3CODE_HOME=${home}`], { stdio: "ignore" });
-    spawnSync("pkill", ["-f", "--", `--home-dir ${home}`], { stdio: "ignore" });
-    spawnSync("pkill", ["-f", "--", `--remote-debugging-port=${cdpPort}`], { stdio: "ignore" });
+    // The backend (apps/server/dist/bin.mjs, run via electron-as-node) is spawned in its own process group, so it can outlive
+    // a killed main process and keep the backend port (3773) taken: kill stragglers by command line. One app at a time.
+    for (const pat of ["apps/server/dist/bin.mjs", `--remote-debugging-port=${cdpPort}`, "node_modules/electron/dist/electron"]) {
+      spawnSync("pkill", ["-9", "-f", "--", pat], { stdio: "ignore" });
+    }
+    await poll("CDP port free", async () => !(await fetch(`http://127.0.0.1:${cdpPort}/json/version`).then(() => true, () => false)), { timeout: 15_000, every: 300 }).catch((e) => console.log(`stop: ${e.message}`));
     await sleep(800);
   };
 
