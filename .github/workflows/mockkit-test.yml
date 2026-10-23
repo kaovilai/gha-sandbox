@@ -24,4 +24,4 @@ jobs:
       - name: Syntax check every mock module
         run: find mockkit -name '*.mjs' -print0 | xargs -0 -n1 node --check
       - name: node --test
-        run: node --test mockkit/test
+        run: node --test mockkit/test/*.test.mjs
