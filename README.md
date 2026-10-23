@@ -16,6 +16,32 @@ orphan `evidence` branch (raw URLs serve `image/*`, so PNG/GIF embed inline in P
 | Emulator capability probes | `emulators.yml` | Working: Android + iOS boot, screenshot, recording |
 | Re-publish any run's artifacts | `publish-run.yml` | Working |
 
+## Using it for other projects (profiles)
+
+The web workflow (`sandbox.yml`) is target-agnostic. Everything project-specific lives in
+`targets/<profile>/`; t3code is just the default profile.
+
+| File | Purpose |
+|---|---|
+| `profile.env` | `USES_VP=1` to set up Vite+ (`vp`), else plain Node; `NODE_VERSION` |
+| `setup.sh` | install deps (cwd = target checkout) |
+| `start.sh` | start the app; log to `$APP_LOG`, write the URL to open into `$APP_URL_FILE` |
+| `scenario.mjs` | Playwright script using `run()` from `lib.mjs`: `shot(name)` + auto video |
+
+```sh
+# any public repo that serves static files from its root
+gh workflow run sandbox.yml -f profile=static -f repo=mdn/beginner-html-site-styled \
+  -f base_ref=main -f head_ref=main
+scripts/sbx run 1234 --profile t3code        # t3code PR 1234 (default profile + repo)
+```
+
+To add a project: copy `targets/static/`, edit `start.sh` for its dev server, and write a
+scenario. Verified profiles: `t3code` (full before/after on a real PR), `static` (MDN sample
+site). `desktop-linux.yml`, `android-app.yml` and `ios-app.yml` are still t3code-specific
+(they reuse upstream's `mobile-showcase` tooling); the same profile split is the path to
+generalize them. For an arbitrary APK/`.app`, `emulators.yml` shows the boot + screenshot +
+recording mechanics to build on.
+
 ## Usage
 
 ```sh
