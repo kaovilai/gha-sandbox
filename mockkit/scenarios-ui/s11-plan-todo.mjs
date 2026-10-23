@@ -5,8 +5,11 @@ import { dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
 export default async function ({ page, shot, env }) {
   await startSession(page, env);
   await sendPrompt(page, "[mock:plan] track the work");
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(1800);
   await shot("plan-early");
+  await page.waitForTimeout(3000);
+  await shot("plan-mid");
+  await dumpPage(page, "s11 mid");
   await page.getByText(/Plan tracked above/).first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1200);
   await shot("plan-late");

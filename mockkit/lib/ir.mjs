@@ -85,7 +85,7 @@ export async function runSteps(stepsIn, sink, ctx) {
         await sleep(pace.toolMs, signal);
         sink.toolStart({ id, kind: a.kind ?? "other", title: a.title, input: a.input, diff: a.diff, locations: a.locations, status: "in_progress" });
         await sleep(pace.toolMs, signal);
-        sink.toolUpdate({ id, status: a.status ?? "completed", text: a.output, diff: a.diff, output: a.rawOutput });
+        sink.toolUpdate({ id, status: a.status ?? "completed", text: a.output, diff: a.diff, output: a.rawOutput ?? a.output });
         break;
       }
       case "read": {
@@ -102,7 +102,7 @@ export async function runSteps(stepsIn, sink, ctx) {
           text = String(e.message);
           status = "failed";
         }
-        sink.toolUpdate({ id, status, text });
+        sink.toolUpdate({ id, status, text, output: text });
         break;
       }
       case "fsWrite": {
@@ -125,8 +125,9 @@ export async function runSteps(stepsIn, sink, ctx) {
         const id = ctx.nextToolId();
         await sleep(pace.toolMs, signal);
         sink.toolStart({ id, kind: "execute", title: a.title ?? a.cmd, input: { command: a.cmd }, status: "in_progress" });
-        const res = await runShell(a.cmd, ctx, (acc) => sink.toolUpdate({ id, status: "in_progress", text: acc }));
-        sink.toolUpdate({ id, status: res.code === 0 ? "completed" : "failed", text: res.output, output: { exitCode: res.code } });
+        const res = await runShell(a.cmd, ctx, (acc) => sink.toolUpdate({ id, status: "in_progress", text: acc, output: { stdout: acc } }));
+        // T3 reads command output/exit code from rawOutput.{stdout,exitCode}
+        sink.toolUpdate({ id, status: res.code === 0 ? "completed" : "failed", text: res.output, output: { stdout: res.output, exitCode: res.code } });
         break;
       }
       case "permission": {

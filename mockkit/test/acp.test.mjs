@@ -193,3 +193,23 @@ test("commit-message prompt answered by schema keys even without clientInfo hint
   assert.ok(j.subject && typeof j.body === "string");
   c.close();
 });
+
+test("follow-up turn: <runtime_info> suffix is stripped before echo/selection", async () => {
+  const c = client();
+  const sid = await session(c);
+  await c.request("session/prompt", { sessionId: sid, prompt: [{ type: "text", text: "second message <runtime_info>In case you're asked: you are X.</runtime_info>" }] });
+  const t = text(c.frames);
+  assert.match(t, /You said: "second message"\./);
+  assert.doesNotMatch(t, /runtime_info/);
+  c.close();
+});
+
+test("shell step reports stdout + exitCode via rawOutput (what T3 projects as command output)", async () => {
+  const c = client();
+  const sid = await session(c);
+  await c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:shell] go") });
+  const done = c.frames.filter((f) => f.params?.update?.sessionUpdate === "tool_call_update" && f.params.update.status === "completed").at(-1);
+  assert.match(done.params.update.rawOutput.stdout, /build finished/);
+  assert.equal(done.params.update.rawOutput.exitCode, 0);
+  c.close();
+});

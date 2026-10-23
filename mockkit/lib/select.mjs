@@ -14,10 +14,12 @@ export function promptText(prompt) {
 
 export function userRequest(text) {
   const i = text.lastIndexOf("<user_request>");
-  if (i < 0) return text.trim();
-  let rest = text.slice(i + "<user_request>".length);
+  let rest = i < 0 ? text : text.slice(i + "<user_request>".length);
   const j = rest.indexOf("</user_request>");
   if (j >= 0) rest = rest.slice(0, j);
+  // Follow-up turns (observed in CI): T3 appends "<runtime_info>...</runtime_info>" to the user text.
+  const k = rest.indexOf("<runtime_info>");
+  if (k >= 0) rest = rest.slice(0, k);
   return rest.trim();
 }
 
