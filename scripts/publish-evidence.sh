@@ -28,6 +28,17 @@ while IFS= read -r -d '' f; do
   esac
 done < <(find "$src" -type f \( -name '*.png' -o -name '*.mp4' -o -name '*.webm' \) -print0)
 
+# PUBLISH_DIAG=1 (failed mobile runs): every 3rd periodic simulator screenshot, 320 px wide, as diag__tNNN.png
+# (artifacts cannot be downloaded because of the egress limit; the evidence branch can be read).
+if [ "${PUBLISH_DIAG:-0}" = 1 ] && [ -d "$src/diag" ]; then
+  n=0
+  for f in "$src"/diag/t*.png; do
+    [ -f "$f" ] || continue
+    n=$((n + 1)); [ $((n % 3)) -eq 1 ] || continue
+    timeout 60 ffmpeg -nostdin -loglevel error -y -i "$f" -vf "scale=320:-1" "$pub/diag__$(basename "$f")" || true
+  done
+fi
+
 if [ -z "$(ls -A "$pub")" ]; then echo "no media found"; exit 0; fi
 
 remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"

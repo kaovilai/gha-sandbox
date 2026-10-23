@@ -152,4 +152,5 @@ jobs:
         timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISH_DIAG: ${{ needs.capture.result != 'success' && '1' || '0' }}
         run: bash scripts/publish-evidence.sh dl ios-app
