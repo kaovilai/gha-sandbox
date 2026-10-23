@@ -1,7 +1,7 @@
 // S04 reasoning-then-answer: agent_thought_chunk stream, then the answer. The reasoning row is a collapsed
 // one-line "Thought: ..." preview (role=button aria-expanded=false); we REALLY expand it before the `expanded` shot
 // and assert aria-expanded=true plus a phrase only present in the full text.
-import { ask, dumpPage, expandRows, expandWork, startSession } from "../lib/ui.mjs";
+import { ask, bodyText, dumpPage, expandRows, expandWork, expectText, startSession } from "../lib/ui.mjs";
 
 export default async function ({ page, shot, env }) {
   await startSession(page, env);
@@ -10,6 +10,8 @@ export default async function ({ page, shot, env }) {
   await shot("thinking-streaming");
   await page.getByText(/simpler approach wins/).first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1200);
+  const collapsedFull = /compare their trade-offs, and then pick the simpler one/.test(await bodyText(page));
+  console.log(`FINDING full thought text present before expanding: ${collapsedFull}`);
   await shot("answer-reasoning-collapsed");
 
   await expandWork(page); // "Worked for Ns" group -> reveals the (still collapsed) reasoning row
@@ -22,13 +24,13 @@ export default async function ({ page, shot, env }) {
     await page.waitForTimeout(600);
   }
   const expandedAttr = await reasoning.getAttribute("aria-expanded").catch(() => null);
-  const bodyText = await page.evaluate(() => document.body.innerText);
-  const fullVisible = /compare their trade-offs, and then pick the simpler one/.test(bodyText);
+  const fullVisible = /compare their trade-offs, and then pick the simpler one/.test(await bodyText(page));
   console.log(`FINDING reasoning aria-expanded=${expandedAttr} full-text-visible=${fullVisible}`);
   await dumpPage(page, "s04 after expand");
-  if (!fullVisible && expandedAttr !== "true") {
+  if (!fullVisible || expandedAttr !== "true") {
     await shot("expand-FAILED");
-    throw new Error("S04: reasoning row did not expand (full thought text not visible, aria-expanded != true)");
+    throw new Error(`S04: reasoning row did not expand (aria-expanded=${expandedAttr}, full thought text visible=${fullVisible})`);
   }
+  await expectText(page, /simpler approach wins/, "the answer stays visible next to the expanded reasoning");
   await shot("reasoning-expanded");
 }

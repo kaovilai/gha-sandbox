@@ -5,7 +5,8 @@ import { mkdirSync, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
 // `init(context)` (optional) runs before the first navigation, e.g. context.addInitScript(...).
-export async function run(fn, { viewport = { width: 1440, height: 900 }, video = true, init, storageState } = {}) {
+// `beforeShot(page)` (optional) runs before every screenshot (mockkit uses it to mask runner hostname/paths, see mockkit/lib/mask.mjs).
+export async function run(fn, { viewport = { width: 1440, height: 900 }, video = true, init, storageState, beforeShot } = {}) {
   const out = process.env.OUT_DIR ?? "out";
   const url = process.env.APP_URL ?? process.env.PAIRING_URL;
   if (!url) throw new Error("APP_URL unset");
@@ -19,7 +20,10 @@ export async function run(fn, { viewport = { width: 1440, height: 900 }, video =
   });
   if (init) await init(context);
   const page = await context.newPage();
-  const shot = (name, opts = {}) => page.screenshot({ path: join(out, `${name}.png`), ...opts });
+  const shot = async (name, opts = {}) => {
+    if (beforeShot) await beforeShot(page);
+    return page.screenshot({ path: join(out, `${name}.png`), ...opts });
+  };
 
   try {
     await page.goto(url, { waitUntil: "networkidle" });

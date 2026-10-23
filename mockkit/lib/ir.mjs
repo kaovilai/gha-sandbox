@@ -14,6 +14,10 @@
 //   {plan:{entries}}                     plan/todo list update
 //   {exitPlan:{planContent}}             xAI exit_plan_mode request: T3 captures planContent into a ProposedPlanCard
 //   {error:{message,code?,kind?}}        fail the turn (kind "usage_limit" = Codex Limited state)
+//   {bgTask:{cmd,description?,kind?,persistent?,until?}}  background task (xAI protocol): kind "command" (default) = tool call completes at
+//                                        once with a `BackgroundTaskStarted` ack, kind "monitor" (+ persistent) = Monitor tool + task_backgrounded.
+//                                        The REAL `sh -c cmd` keeps running past the end of the turn; completion is reported when it exits (and the
+//                                        optional hold gate `until` is released). ACP/Grok adapter only; others run it as a plain `sh` step.
 //   {hold:{name}}                        block until $MOCK_CONTROL_DIR/release/<name> exists
 //   {sleep:{ms}}                         sleep
 //
@@ -45,6 +49,7 @@ export const S = {
   ask: (o) => ({ ask: o }),
   plan: (entries) => ({ plan: { entries } }),
   exitPlan: (planContent) => ({ exitPlan: { planContent } }),
+  bgTask: (cmd, o = {}) => ({ bgTask: { cmd, ...o } }),
   error: (message, code, kind) => ({ error: { message, code, kind } }),
   hold: (name) => ({ hold: { name } }),
   sleep: (ms) => ({ sleep: { ms } }),
@@ -131,6 +136,27 @@ export async function runSteps(stepsIn, sink, ctx) {
         const res = await runShell(a.cmd, ctx, (acc) => sink.toolUpdate({ id, status: "in_progress", text: acc, output: { stdout: acc } }));
         // T3 reads command output/exit code from rawOutput.{stdout,exitCode}
         sink.toolUpdate({ id, status: res.code === 0 ? "completed" : "failed", text: res.output, output: { stdout: res.output, exitCode: res.code } });
+        break;
+      }
+      case "bgTask": {
+        if (!sink.bgStart) {
+          // adapters without a background-task protocol: plain foreground step
+          await runSteps([{ sh: { cmd: a.cmd, title: a.description } }], sink, ctx);
+          break;
+        }
+        const id = ctx.nextToolId();
+        const taskId = a.taskId ?? `a1b2c3d4-e5f6-4a7b-8c9d-${id.replace(/\D+/g, "").padStart(12, "0")}`; // uuid-shaped like Grok task ids (T3 shows its first 8 chars)
+        await sleep(pace.toolMs, signal);
+        const info = { id, taskId, cmd: a.cmd, description: a.description ?? a.cmd, kind: a.kind ?? "command", persistent: a.persistent === true };
+        sink.bgStart(info);
+        // outlives the turn on purpose (no abort wiring: Stop must not kill it, process exit does)
+        runShell(a.cmd, { ...ctx, signal: undefined }, () => {})
+          .then(async (res) => {
+            if (a.until) await holdGate(a.until, { env: ctx.env, log });
+            log?.("bgTask", { state: "completed", taskId, exitCode: res.code });
+            sink.bgDone({ ...info, output: res.output, exitCode: res.code });
+          })
+          .catch((e) => log?.("crash", { error: String(e?.stack ?? e) }));
         break;
       }
       case "permission": {

@@ -111,6 +111,99 @@ export function serveAcp({ input = process.stdin, output = process.stdout, env =
           ...(t.output !== undefined ? { rawOutput: t.output } : {}),
         }),
       plan: (entries) => update(s.id, { sessionUpdate: "plan", entries }),
+      // xAI background tasks (frame shapes: upstream grok_background_bash / grok_monitor transcripts).
+      //  kind "command": the tool call completes with a BackgroundTaskStarted ack while the process runs (the root turn is held open
+      //                  by T3 until the task ends).
+      //  kind "monitor": a Monitor tool call + `_x.ai/task_backgrounded`; with `persistent` the root turn completes while the task stays
+      //                  pending, which is the state that shows the composer's background-work banner (title = description, Stop button).
+      // The end of either is a `_x.ai/task_completed` notification carrying task_snapshot.
+      bgStart: (t) => {
+        if (t.kind === "monitor") {
+          const meta = { "x.ai/tool": { version: 1, name: "monitor", kind: "monitor", namespace: "grok_build", label: "Monitor", read_only: false } };
+          update(s.id, { sessionUpdate: "tool_call", toolCallId: t.id, title: "monitor", rawInput: { command: t.cmd, description: t.description }, _meta: meta });
+          update(s.id, {
+            sessionUpdate: "tool_call_update",
+            toolCallId: t.id,
+            kind: "other",
+            title: `Start monitor: ${t.description}`,
+            locations: [],
+            rawInput: { variant: "Monitor", command: t.cmd, description: t.description, timeout_ms: 36_000_000, persistent: Boolean(t.persistent) },
+            _meta: meta,
+          });
+          notify("_x.ai/task_backgrounded", {
+            sessionId: s.id,
+            update: { sessionUpdate: "task_backgrounded", tool_call_id: t.id, task_id: t.taskId, command: t.cmd, cwd: s.cwd, monitor_description: t.description, description: t.description },
+          });
+          xUpdate(s.id, {
+            sessionUpdate: "background_tasks",
+            tasks: [{ task_id: t.taskId, command: t.cmd, display_command: `[monitor] ${t.description}`, description: t.description, cwd: s.cwd, kind: "monitor", status: "running", started_at: new Date().toISOString() }],
+          });
+          update(s.id, { sessionUpdate: "tool_call_update", toolCallId: t.id, status: "completed", rawOutput: { type: "Monitor", taskId: t.taskId, timeoutMs: 36_000_000, persistent: Boolean(t.persistent) } });
+          return;
+        }
+        update(s.id, {
+          sessionUpdate: "tool_call",
+          toolCallId: t.id,
+          title: t.description,
+          kind: "execute",
+          status: "in_progress",
+          rawInput: { command: t.cmd, description: t.description, background: true, timeout: 0 },
+        });
+        update(s.id, {
+          sessionUpdate: "tool_call_update",
+          toolCallId: t.id,
+          status: "completed",
+          title: `[bg] ${t.cmd}`,
+          content: [{ type: "content", content: { type: "text", text: `Background task ${t.taskId} started` } }],
+          rawOutput: { type: "BackgroundTaskStarted", task_id: t.taskId, task_type: "bash", status: "running", command: t.cmd, summary: t.description },
+        });
+      },
+      bgDone: (t) => {
+        const monitor = t.kind === "monitor";
+        notify("_x.ai/task_completed", {
+          sessionId: s.id,
+          update: {
+            sessionUpdate: "task_completed",
+            task_snapshot: {
+              task_id: t.taskId,
+              command: t.cmd,
+              ...(monitor ? { display_command: `[monitor] ${t.description}` } : {}),
+              description: t.description,
+              output: t.output,
+              exit_code: t.exitCode,
+              completed: true,
+              kind: monitor ? "monitor" : "bash",
+              is_backgrounded: true,
+            },
+            will_wake: false,
+          },
+        });
+        if (monitor) {
+          xUpdate(s.id, {
+            sessionUpdate: "background_tasks",
+            tasks: [{ task_id: t.taskId, command: t.cmd, display_command: `[monitor] ${t.description}`, description: t.description, cwd: s.cwd, kind: "monitor", status: "completed", ended_at: new Date().toISOString(), exit_code: t.exitCode }],
+          });
+        }
+        // Real Grok then wakes itself with a `task-completed-<id>` turn that reads the result (get_command_or_subagent_output);
+        // that TaskOutput tool result is what finishes the still-running task item in T3 (the banner clears, the run list gets the wake run).
+        const promptId = `task-completed-${t.taskId}`;
+        const wake = (u) => notify("session/update", { sessionId: s.id, update: u, _meta: { promptId } });
+        const toolMeta = { "x.ai/tool": { version: 1, name: "get_command_or_subagent_output", kind: "background_task_action", namespace: "grok_build", label: "Background Task", read_only: true } };
+        const callId = `mock-wake-${++nextTool}`;
+        const shown = monitor ? `[monitor] ${t.description}` : t.cmd;
+        wake({ sessionUpdate: "tool_call", toolCallId: callId, title: "get_command_or_subagent_output", rawInput: { task_ids: [t.taskId] }, _meta: toolMeta });
+        wake({ sessionUpdate: "tool_call_update", toolCallId: callId, kind: "other", title: `Get task output: ${t.taskId}`, locations: [], rawInput: { variant: "TaskOutput", task_ids: [t.taskId], timeout_ms: null }, _meta: toolMeta });
+        wake({
+          sessionUpdate: "tool_call_update",
+          toolCallId: callId,
+          status: "completed",
+          title: `${shown} (${t.taskId.slice(0, 8)})`,
+          rawOutput: { type: "TaskOutput", Result: { task_id: t.taskId, command: shown, status: "completed", exit_code: t.exitCode, output: t.output, truncated: false, raw_output_bytes: Buffer.byteLength(t.output ?? "") } },
+        });
+        const last = String(t.output ?? "").trim().split("\n").at(-1) ?? "";
+        wake({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `${t.description} finished (exit ${t.exitCode}). Last line: ${last}` } });
+        xUpdate(s.id, { sessionUpdate: "turn_completed", prompt_id: promptId, stop_reason: "end_turn" });
+      },
       permission: async (p) => {
         const res = await callClient(
           "session/request_permission",

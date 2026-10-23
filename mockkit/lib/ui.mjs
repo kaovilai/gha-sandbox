@@ -180,3 +180,56 @@ export async function setRuntimeMode(page, labelRe, { shot } = {}) {
     .click();
   await page.waitForTimeout(500);
 }
+
+// ---- assertions: fail loudly (with a page dump in the CI log) instead of "the flow ran" -------------------------------
+export const bodyText = (page) => page.evaluate(() => document.body.innerText);
+
+// Wait for a locator to be visible; dump the page + throw with the claim being proven when it never shows.
+export async function expectVisible(page, loc, what, timeout = 20_000) {
+  try {
+    await loc.first().waitFor({ state: "visible", timeout });
+  } catch {
+    await dumpPage(page, `ASSERT FAILED: ${what}`).catch(() => {});
+    throw new Error(`assertion failed: expected ${what}`);
+  }
+  return loc.first();
+}
+
+// Text (string | RegExp) visible somewhere in the page.
+export const expectText = (page, matcher, what, timeout = 20_000) => expectVisible(page, page.getByText(matcher), what ?? String(matcher), timeout);
+
+// Text must NOT be present in the rendered page (innerText), e.g. a leaked internal prompt.
+export async function expectNoText(page, re, what) {
+  const t = await bodyText(page);
+  const m = t.match(re);
+  if (m) {
+    await dumpPage(page, `ASSERT FAILED (unexpected text): ${what}`).catch(() => {});
+    throw new Error(`assertion failed: ${what} (found ${JSON.stringify(m[0].slice(0, 120))})`);
+  }
+}
+
+// Poll the page's innerText until it matches (or fail with a dump). Returns the match.
+export async function expectBody(page, re, what, timeout = 20_000) {
+  const t0 = Date.now();
+  for (;;) {
+    const m = (await bodyText(page)).match(re);
+    if (m) return m;
+    if (Date.now() - t0 > timeout) break;
+    await page.waitForTimeout(300);
+  }
+  await dumpPage(page, `ASSERT FAILED: ${what}`).catch(() => {});
+  throw new Error(`assertion failed: expected ${what} (page text did not match ${re})`);
+}
+
+// Poll an element's text until it matches (e.g. a table or code block).
+export async function expectLocatorText(page, loc, re, what, timeout = 20_000) {
+  const t0 = Date.now();
+  for (;;) {
+    const t = await loc.first().innerText({ timeout: 2000 }).catch(() => "");
+    if (re.test(t)) return t;
+    if (Date.now() - t0 > timeout) break;
+    await page.waitForTimeout(300);
+  }
+  await dumpPage(page, `ASSERT FAILED: ${what}`).catch(() => {});
+  throw new Error(`assertion failed: expected ${what} (element text did not match ${re})`);
+}

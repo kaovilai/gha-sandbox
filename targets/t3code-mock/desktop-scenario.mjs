@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { bootDesktop } from "../../mockkit/lib/desktop.mjs";
 import { native, rootShot, sleep, windowTree } from "../../mockkit/lib/native.mjs";
+import { buildMaskRules, installMaskPage, maskNow } from "../../mockkit/lib/mask.mjs";
 import { assertShell, dumpPage } from "../../mockkit/lib/ui.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -121,6 +122,9 @@ for (const id of ids) {
     browser = att.browser;
     const page = att.page;
     await assertShell(page, `desktop shell (${id})`, 90_000);
+    // mask runner hostname / absolute paths in the renderer DOM (root X11 captures and the x11grab video show the masked text)
+    const maskRules = buildMaskRules({ ws: app.ws, root: app.root });
+    await installMaskPage(page, maskRules);
     const nat = native(app.win);
     const env = { ...process.env, MOCKKIT_WS: app.ws, MOCK_CONTROL_DIR: app.ctl, MOCK_LOG: app.mockLog };
     process.env.APP_URL = page.url();
@@ -129,6 +133,7 @@ for (const id of ids) {
     await sleep(800);
     const shot = async (name, opts = {}) => {
       const path = join(out, `${id}-${name}.png`);
+      await maskNow(page, maskRules);
       if (opts.clip) return page.screenshot({ path, ...opts });
       return rootShot(path);
     };
