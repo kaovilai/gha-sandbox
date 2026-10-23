@@ -1,0 +1,1 @@
+target=mdn/beginner-html-site-styled base=main head=main scenario=
