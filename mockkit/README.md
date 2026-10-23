@@ -244,7 +244,7 @@ Every server request T3 answers and every notification it consumes, with what th
 | `mcpToolCall.mcpAppUi` + `mcpServer/resource/read` (MCP app frame) | `ui://` HTML served with mime `text/html;profile=mcp-app`; `mcpServer/tool/call` answers ok | `S.mcpApp` / `mcp-app` | s58 |
 | `execCommandApproval`, `applyPatchApproval` (legacy) | `MOCK_CODEX_LEGACY_APPROVALS=1` | `S.permission` unchanged | unit test only |
 
-Run: `-f scenarios=codex-extra` (or `codex,codex-extra`). Verified in CI (screenshots read), what T3 really shows:
+Run: `-f scenarios=codex-extra` (or `codex,codex-extra`; CI runs 40002719710 + 40010846438 + 40012921438: all 10 extra drivers ok; of the existing 17, 16 ok in the pack run and s21 passes alone but failed in two pack runs right after s20, an order-dependent add-project flake that predates this track and also hit another branch's run). Verified in CI (screenshots read), what T3 really shows:
 
 * **s50** "App access approval" + connector name, Decline / Approve and an overflow menu (Cancel, Always allow this session, Always allow). The persist choices are only in the `...` menu.
 * **s51** renders as "File change approval" with the `reason` text; the granted paths are NOT shown. Granting lets the write happen (`dist/build.log`).
@@ -252,7 +252,7 @@ Run: `-f scenarios=codex-extra` (or `codex,codex-extra`). Verified in CI (screen
 * **s59** the child's approval card appears in the PARENT composer; approving finishes both turns (+3 -0 NOTES.md). The card shows the absolute runner path (Codex sends absolute paths).
 * **s53** composer banner "Pursuing goal <objective>" -> "Goal complete · 4k tokens" + Clear; sidebar shows "Goal 3s". `/goal clear` answers locally in T3 ("Goal cleared.").
 * **s54** "Edit from here" dialog; "Revert and keep changes" rewinds the thread (the 3rd prompt returns to the composer, the next turn counts from 3 again). "Revert files too" is refused by T3 itself ("File restore requires an isolated worktree", shared workspace), captured as a finding, not a mock gap.
-* **s55** Providers card "Authenticated as <blurred email> · ChatGPT Pro 20x Subscription"; `/usage-limits` banner with Session 77% / Weekly 59% left, "1 reset credit banked", "Use reset" (confirm dialog "Use a reset credit?", then `consume` answers `reset` and T3 re-probes).
+* **s55** Providers card "Authenticated as <blurred email> · ChatGPT Pro 20x Subscription"; `/usage-limits` banner with Session 77% / Weekly 59% left, "1 reset credit banked", "Use reset" (confirm dialog "Use a reset credit?", then `consume` answers `reset`; T3 shows "Reset applied. Your windows have cleared." but the Session/Weekly bars and the credit count did not refresh within 4.5 s, the mock's next `rateLimits/read` reports 0% used).
 * **s56** commentary line before the answer, work log "Searched the web 2 times". **s57** "Retrying provider (2/5)" row while held, cleared when output resumes. **s58** the HTML app renders inline in the timeline (sandboxed iframe).
 
 Not covered (honest): background terminals (`thread/backgroundTerminals/*`, a command item that outlives its turn, T3 then re-prompts the agent on completion),
