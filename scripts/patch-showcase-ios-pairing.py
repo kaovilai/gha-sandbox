@@ -103,11 +103,35 @@ state_log = (
     "    requestedScene,\n"
     "  ]);\n"
 )
-if src.count(a1) == 1 and src.count(old_retry) == 1 and src.count(a3) == 1:
-    src = src.replace(a1, helpers + a1, 1).replace(old_retry, new_retry, 1).replace(a3, a3 + state_log, 1)
+# session scopes decide whether approve/answer/stop are enabled ("This connection cannot control this task")
+imp_anchor = 'import { useConnectionController } from "../connection/useConnectionController";\n'
+imp_new = (
+    'import { useAtomValue } from "@effect/atom-react";\n'
+    'import { environmentSession } from "../../state/session";\n'
+)
+session_log = (
+    "  const ghaSession = useAtomValue(\n"
+    '    environmentSession.sessionStateAtom((showcaseThread?.environmentId ?? "none") as never),\n'
+    "  );\n"
+    "  useEffect(() => {\n"
+    "    console.warn(`[gha-session] ${ghaSession._tag} ${ghaDescribe(ghaSession)}`);\n"
+    "  }, [ghaSession]);\n"
+)
+if (
+    src.count(a1) == 1
+    and src.count(old_retry) == 1
+    and src.count(a3) == 1
+    and src.count(imp_anchor) == 1
+):
+    src = (
+        src.replace(imp_anchor, imp_anchor + imp_new, 1)
+        .replace(a1, helpers + a1, 1)
+        .replace(old_retry, new_retry, 1)
+        .replace(a3, a3 + session_log + state_log, 1)
+    )
     open(coord_path, "w").write(src)
     print("coordinator fresh-pairing patch applied")
 else:
-    print("WARN: coordinator anchors not found", src.count(a1), src.count(old_retry), src.count(a3))
+    print("WARN: coordinator anchors not found", src.count(a1), src.count(old_retry), src.count(a3), src.count(imp_anchor))
     ok = False
 sys.exit(0 if ok else 1)

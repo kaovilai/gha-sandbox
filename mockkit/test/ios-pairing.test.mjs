@@ -74,6 +74,7 @@ test("patch-showcase-ios-pairing.py patches anchors and refuses when they are mi
   writeFileSync(
     coord,
     [
+      'import { useConnectionController } from "../connection/useConnectionController";',
       'const SHOWCASE_ENABLED = process.env.EXPO_PUBLIC_SHOWCASE === "1";',
       "          const paired = await retryShowcaseOperation(",
       "            async () => AsyncResult.isSuccess(await connectPairingUrl(pairingUrl)),",
@@ -91,6 +92,7 @@ test("patch-showcase-ios-pairing.py patches anchors and refuses when they are mi
   assert.match(c, /ghaFreshPairingUrl\(pairingUrl\)/);
   assert.match(c, /attemptTimeoutMs: 120_000/);
   assert.match(c, /\[gha-fixture\]/);
+  assert.match(c, /\[gha-session\]/);
   // second run: anchors are gone -> non-zero exit, so CI prints WARN
   const again = spawnSync("python3", ["-I", py, showcase, coord], { encoding: "utf8" });
   assert.notEqual(again.status, 0);
