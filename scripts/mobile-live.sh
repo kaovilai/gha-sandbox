@@ -139,7 +139,12 @@ write_scene() {
     printf %s "$1" > "$c/Library/Caches/T3ShowcaseScene"
   fi
 }
-back() { if [ "$plat" = android ]; then adb shell input keyevent KEYCODE_BACK; else axe tap -x 30 -y 70 --udid "$UDID" >/dev/null 2>&1; fi; }
+# iOS: native-stack interactive pop = edge swipe (AXe preset); fall back to tapping the header back button.
+back() {
+  if [ "$plat" = android ]; then adb shell input keyevent KEYCODE_BACK
+  else axe gesture swipe-from-left-edge --udid "$UDID" >/dev/null 2>&1 || axe tap -x 30 -y 70 --udid "$UDID" >/dev/null 2>&1
+  fi
+}
 
 # ---- server helpers ---------------------------------------------------------------------------------------------
 t3() { node apps/server/src/bin.ts "$@"; }
@@ -206,6 +211,23 @@ open_thread() { # <title>
   write_scene thread; sleep 8; write_scene threads
   sleep 2
   tap_re "$title" 60 "open-retry-$navs"
+}
+
+# The thread screen disables Stop/Approve/Submit ("This connection cannot respond to approvals / submit answers /
+# control this task") while the environment's session scopes are not loaded (session state is SWR-cached 30 s and a
+# failed/slow first fetch sticks until the thread is remounted). Remount after the cache is stale until the hint is gone.
+ensure_operable() { # <title>
+  local i
+  for i in 1 2 3 4; do
+    dump > "$out/ui/operable.dump" 2>/dev/null
+    node "$uia" find "cannot (respond to approvals|submit answers|control this task)" < "$out/ui/operable.dump" >/dev/null || return 0
+    log "thread controls disabled (scopes not loaded), try $i: sleep 35 then remount"
+    sleep 35
+    open_thread "$1" || return 1
+    sleep 3
+  done
+  log "thread controls still disabled after remounts"
+  return 1
 }
 
 results=()
@@ -309,6 +331,7 @@ run_s41() {
   ui_state s41-pending
   server_truth s41-pending "$tid"
   [ -e "$ws/NOTES.md" ] && log "UNEXPECTED: NOTES.md exists before approval"
+  [ "$plat" = ios ] && { ensure_operable "$title" || true; shot s41-approval-operable; }
   tap_re "^(Approve|Allow once)$" 20 s41-approve || { rec_stop s41; return 1; }
   wait_server "$tid" "Approved" 90 || { shot s41-no-resolution; rec_stop s41; return 1; }
   sleep 4
@@ -341,6 +364,7 @@ run_s42() {
   shot s42-question-pending
   ui_state s42-pending
   server_truth s42-pending "$tid"
+  [ "$plat" = ios ] && { ensure_operable "$title" || true; }
   tap_re "^Strict" 15 s42-option || { tap_re "Fill in the pending answers" 10 s42-expand && tap_re "^Strict" 15 s42-option2; } || { rec_stop s42; return 1; }
   sleep 1
   shot s42-question-selected

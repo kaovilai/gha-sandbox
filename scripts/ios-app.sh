@@ -42,6 +42,27 @@ if [ "${IOS_LIVE:-0}" = 1 ]; then
   # Live mock threads (mockkit): needs the kept servers/simulator; the coordinator must not pull the app back.
   python3 "$root/scripts/patch-showcase-live.py" apps/mobile/src/features/showcase/ShowcaseCaptureCoordinator.tsx || echo "WARN: live-nav patch failed"
 fi
+# --- iOS live: fresh pairing credential per attempt (section "iOS live pairing" in mockkit/README.md) ---------------
+# Upstream mints one-time, 5 min credentials before launch and the app retries those same dead URLs; mint a new one
+# per attempt from a local server instead, and log pairing/fixture state into pass1.log (step log shows it live).
+if [ "${IOS_FRESH_PAIRING:-${IOS_LIVE:-0}}" = 1 ]; then
+  export PAIRING_ENVS_FILE="$out/diag/pairing-envs.json" PAIRING_CWD="$(pwd)"
+  python3 "$root/scripts/patch-showcase-ios-pairing.py" scripts/mobile-showcase.ts apps/mobile/src/features/showcase/ShowcaseCaptureCoordinator.tsx || echo "WARN: fresh-pairing patch failed"
+  node "$root/scripts/ios-pairing-server.mjs" > "$out/diag/pairing.log" 2>&1 &
+  diag3=$!
+fi
+# Live view in the step log (artifacts cannot be downloaded: egress limit): app JS warnings, pairing server, screen labels.
+touch "$out/pass1.log" "$out/diag/pairing.log"
+( tail -n 0 -F "$out/pass1.log" "$out/diag/pairing.log" 2>/dev/null | grep --line-buffered -E '\[gha-|\[pairing|Error|ERROR|FAILED|Unhandled|Pairing|pairing|Showcase' | awk '{print substr($0,1,320); fflush()}' ) &
+diag4=$!
+if [ "${IOS_LIVE:-0}" = 1 ]; then
+  ( while :; do
+      sleep 45
+      u=$(xcrun simctl list devices booted -j 2>/dev/null | jq -r '[.devices[][] | select(.state=="Booted")][0].udid // empty')
+      [ -n "$u" ] && echo "[diag $(date +%T)] screen: $(timeout 30 axe describe-ui --udid "$u" 2>/dev/null | node "$root/scripts/uia.mjs" texts 2>/dev/null | head -12 | cut -c1-70 | tr '\n' '|')"
+    done ) &
+  diag5=$!
+fi
 if [ "${IOS_KEEP_RUNNING:-0}" = 1 ]; then
   pnpm screenshots:mobile "${args[@]}" --keep-running > "$out/pass1.log" 2>&1
   rc1=$?
@@ -59,7 +80,13 @@ else
     rm -f "$out"/full.mp4.sb-* 2>/dev/null || true
   fi
 fi
-tail -40 "$out/pass1.log" | cut -c1-200
+grep -vE 'Reanimated|react-native-pdf|react-native-blob|async-storage|nitro-modules|Clerk|Bundled|Require cycle|logger-configuration|strict. mode|^\s*$' "$out/pass1.log" | tail -60 | cut -c1-240
+if [ "$rc1" -ne 0 ]; then
+  echo "=== pass1.log [gha-*] lines (last 80) ==="; grep -E '\[gha-' "$out/pass1.log" | tail -80 | cut -c1-300
+  echo "=== simulator log: T3Code process (pair/error/showcase), last 80 ==="
+  xcrun simctl spawn booted log show --style compact --last 30m --predicate 'process == "T3Code"' 2>/dev/null | grep -iE 'pair|error|fail|showcase|bootstrap|denied' | tail -80 | cut -c1-260 || true
+  echo "=== pairing.log ==="; tail -40 "$out/diag/pairing.log" | cut -c1-260
+fi
 mkdir -p "$out/screenshots"
 cp -r artifacts/app-store/screenshots/apple/. "$out/screenshots/" 2>/dev/null || true
 
@@ -67,7 +94,8 @@ if [ "$rc1" -eq 0 ] && [ "${IOS_LIVE:-0}" = 1 ]; then
   sroot=$(sed -n 's/^Showcase environments kept at \(.*\) (.*/\1/p' "$out/pass1.log" | tail -1)
   echo "showcase root: $sroot"
   LIVE_OUT="$out/live" LIVE_SCENARIOS="${LIVE_SCENARIOS:-s40 s41 s42}" bash "$root/scripts/mobile-live.sh" ios "$sroot" 2>&1 | tee "$out/live.log"
-  echo "mobile-live exit ${PIPESTATUS[0]}"
+  live_rc=${PIPESTATUS[0]}
+  echo "mobile-live exit $live_rc"
   pkill -f 'apps/server/src/bin.ts serve' 2>/dev/null; pkill -f 'expo start' 2>/dev/null; true
 elif [ "$rc1" -eq 0 ] && [ "${IOS_KEEP_RUNNING:-0}" = 1 ]; then
   # Record a short clip from the still-running simulator while AXe scrolls the app.
@@ -88,7 +116,9 @@ elif [ "$rc1" -eq 0 ] && [ "${IOS_KEEP_RUNNING:-0}" = 1 ]; then
     echo "no booted simulator; skipping recording"
   fi
 fi
-kill "$diag1" "$diag2" 2>/dev/null || true
+kill "$diag1" "$diag2" ${diag3:-} ${diag4:-} ${diag5:-} 2>/dev/null || true
+pkill -f 'tail -n 0 -F' 2>/dev/null || true
 cd "$root"
 find "$out" -type f | head -40
+[ "$rc1" -eq 0 ] && rc1=${live_rc:-0}
 exit "$rc1"

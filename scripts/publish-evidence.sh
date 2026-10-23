@@ -21,12 +21,23 @@ while IFS= read -r -d '' f; do
     *.mp4|*.webm)
       base=${flat%.*}
       # Long recordings: keep the last 30 s (-sseof is a no-op for shorter clips).
-      timeout 300 ffmpeg -nostdin -loglevel error -y -sseof -30 -i "$f" -c:v libx264 -pix_fmt yuv420p "$pub/$base.mp4"
+      timeout 300 ffmpeg -nostdin -loglevel error -y -sseof -30 -i "$f" -c:v libx264 -pix_fmt yuv420p "$pub/$base.mp4" || echo "WARN: mp4 trim failed for $f"
       # GIF for inline embedding: last 15 s, <=480 px wide, 8 fps.
-      timeout 300 ffmpeg -nostdin -loglevel error -y -sseof -15 -i "$f" -vf "fps=8,scale='min(480,iw)':-1:flags=lanczos" "$pub/$base.gif"
+      { timeout 300 ffmpeg -nostdin -loglevel error -y -sseof -15 -i "$f" -vf "fps=8,scale='min(480,iw)':-1:flags=lanczos" "$pub/$base.gif" || timeout 300 ffmpeg -nostdin -loglevel error -y -i "$f" -t 15 -vf "fps=8,scale='min(480,iw)':-1:flags=lanczos" "$pub/$base.gif"; } || echo "WARN: gif failed for $f"
       ;;
   esac
 done < <(find "$src" -type f \( -name '*.png' -o -name '*.mp4' -o -name '*.webm' \) -print0)
+
+# PUBLISH_DIAG=1 (failed mobile runs): every 3rd periodic simulator screenshot, 320 px wide, as diag__tNNN.png
+# (artifacts cannot be downloaded because of the egress limit; the evidence branch can be read).
+if [ "${PUBLISH_DIAG:-0}" = 1 ] && [ -d "$src/diag" ]; then
+  n=0
+  for f in "$src"/diag/t*.png; do
+    [ -f "$f" ] || continue
+    n=$((n + 1)); [ $((n % 3)) -eq 1 ] || continue
+    timeout 60 ffmpeg -nostdin -loglevel error -y -i "$f" -vf "scale=320:-1" "$pub/diag__$(basename "$f")" || true
+  done
+fi
 
 if [ -z "$(ls -A "$pub")" ]; then echo "no media found"; exit 0; fi
 
