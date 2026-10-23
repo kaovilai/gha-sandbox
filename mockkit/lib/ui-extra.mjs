@@ -71,7 +71,7 @@ export async function pickInstance(page, displayName, { shot } = {}) {
   await btn.click();
   await page.waitForTimeout(900);
   await shot?.("picker-instance");
-  await page.getByText("Mock Build", { exact: true }).first().click();
+  await page.getByText("Mock Build", { exact: true }).last().click(); // popup is portaled last; first() would be the composer trigger label
   await page.waitForTimeout(800);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500);
