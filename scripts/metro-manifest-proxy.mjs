@@ -69,14 +69,14 @@ const server = http.createServer(async (req, res) => {
     console.log(`${req.method} ${(req.url ?? "").slice(0, 110)} -> ${res.statusCode} ${Date.now() - t0}ms`),
   );
   const pathname = new URL(req.url ?? "/", "http://x").pathname;
-  if (req.method === "GET" && pathname === "/") {
+  if ((req.method === "GET" || req.method === "HEAD") && pathname === "/") {
     const deadline = Date.now() + 120_000;
     while (!cached && Date.now() < deadline) await new Promise((r) => setTimeout(r, 250));
     if (cached) {
       const headers = { ...cached.headers, "content-length": String(cached.body.length) };
       delete headers["transfer-encoding"];
       res.writeHead(cached.status, headers);
-      res.end(cached.body);
+      res.end(req.method === "HEAD" ? undefined : cached.body);
       return;
     }
   }
