@@ -45,7 +45,7 @@ recording mechanics to build on.
 ## Usage
 
 ```sh
-scripts/sbx run 1234 scenarios/example.mjs            # web: PR number of target repo
+scripts/sbx run 1234                                  # web: PR number of target repo (profile t3code)
 gh workflow run desktop-linux.yml -f ref=pull/1234/head
 gh workflow run android-app.yml   -f ref=pull/1234/head
 gh workflow run ios-app.yml       -f ref=pull/1234/head [-f keep_running=true]
