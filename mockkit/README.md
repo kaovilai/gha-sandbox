@@ -350,7 +350,7 @@ Codex sends the goal's first turn before `thread/goal/set active`: a scenario th
   (titles "Codex live stream" / "Codex approval" / "Codex question"). Codex pass output goes to `live/codex/` (published as `live__codex__s40-*.png`, results `codex-s40=ok`);
   `both` runs the Grok pass, then the Codex pass on the same server and app. Every `server_truth` checks `thread.providerInstanceId` equals the pass provider (mismatch fails the scenario).
   Codex approval card buttons are `Allow once`, `Allow session`, `Decline` (Grok: `Approve`, ...); the driver taps `^(Approve|Allow once)$`.
-  iOS shares the script and only passes the env through the job (`MOCK_PROVIDER`); iOS live CI verification is a separate track.
+  iOS shares the script and the `mock_provider` input; verified green on iOS live with both providers (run 40029083323).
 * Verified: desktop Codex run 39997253161 (6/6; GPT-6-Astra picker, OpenAI icon in sidebar row, Settings > Providers "Codex ... Authenticated - OpenAI API Key", Grok shown Disabled).
   Android live Codex run 40003071583 (S40/S41/S42, all `codex-s4x=ok`): thread rows and composer show the OpenAI glyph (the mobile composer shows the provider icon, not the model name; the
   GPT-6-Astra name is only visible on desktop/web), server truth `provider=codex model=gpt-6-astra`, approval card `Allow once / Allow session / Decline`, "Approved: NOTES.md was written", answered question.
@@ -381,7 +381,7 @@ Codex sends the goal's first turn before `thread/goal/set active`: a scenario th
 - S40 clip is a 30 s tail starting at the held state; early growth is in the timed PNGs. The `s40-held` UI dump can have 0 nodes (vacuous guard); server truth is the real check.
 - Hostname/path masking is DOM text replacement: input values are masked only while no field is focused; the desktop path installs the same mask over CDP (verified in CI, run 40014597750: s03/s06/s08 green, the root X11 capture shows `sandbox-vm`).
 - Claude pack: S03 "streaming" and "done" shots look alike (T3 shows Claude text per finished block); S18's detail pane is the Claude card only because the driver clicks `Select Claude`; the account email is blurred by T3. Plan-mode UI (S11b) exists only with the client setting `planModeEnabled` (the driver sets it). Claude-pack drivers s22/s23 are Claude-only and pass vacuously (FINDING line) when run for another provider.
-- iOS live path (`mobile-live.sh ios`) is written but untested: the upstream showcase pairing flake blocked both attempts.
+- iOS live (`mobile-live.sh ios`) verified green for Grok and Codex (run 40029083323); simulator temp paths show in approval cards. Non-live iOS still uses upstream pairing.
 
 ## Evidence hardening (track tighten)
 
