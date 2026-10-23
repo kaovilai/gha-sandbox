@@ -98,6 +98,35 @@ T3CODE_OTEL_SDK_DISABLED=true T3CODE_NO_BROWSER=1 T3CODE_DISABLE_AUTO_UPDATE=tru
 * Selecting an option in the ask-user-question panel submits immediately.
 * The `<user_request>` wrapper is not needed for web turns in the cases seen; the parser handles both.
 
+## Desktop (Electron under Xvfb)
+
+`desktop-linux.yml -f mock=true -f scenarios=desktop` (packs.json `desktop`; ids/prefixes also work: `s03,dk02`). Flow:
+`scripts/desktop-capture.sh` (MOCK=true) builds the target once, then `targets/t3code-mock/desktop-scenario.mjs` boots ONE isolated BUILT
+Electron app per scenario (`lib/desktop.mjs`, launcher `bin/desktop-electron.mjs` = start-electron.mjs + extra flags):
+
+* fresh `T3CODE_HOME` (state dir = `$T3CODE_HOME/userdata`, non-dev), fresh `XDG_CONFIG_HOME` (Chromium profile), fresh workspace + control dir;
+  `seed/settings.mjs` writes `settings.json` (mock Grok READY) and `client-settings.json` (skips onboarding, desktop reads it from the state dir, not localStorage);
+* flags `--remote-debugging-port=9222 --password-store=basic` (before the script path, as dev-electron.mjs does); `T3CODE_DISABLE_AUTO_UPDATE=true`;
+  `VITE_DEV_SERVER_URL` must stay unset (it flips to dev mode: DevTools window, `dev` state dir);
+* Playwright `chromium.connectOverCDP` attaches to the renderer (page URL is `t3code://app/`, not http); the SAME `scenarios-ui` drivers run unchanged
+  (`page.viewportSize()` is stubbed from `innerWidth/innerHeight`, CDP has no emulated viewport);
+* `shot(name)` = `import -window root` (real X11 desktop: titleBarOverlay controls, native popups); shots with a `clip` option stay Playwright element crops;
+* video = ffmpeg x11grab of the display per scenario (`<id>.mp4`, 15 fps); `native` helper (xdotool key/click, window tree) is passed to desktop-only drivers in `scenarios-desktop/` (ids `dk*`).
+
+Isolation gotcha: the backend (`apps/server/dist/bin.mjs`) runs in its own process group and survives a killed main process, keeping port 3773
+and making the next app's CDP port bind fail ("Address already in use"). `desktop.mjs` stop() pkills stragglers and waits for the CDP port to free.
+`mock` mode installs a smaller apt set + static ffmpeg: the full apt set (apt ffmpeg) stalled the runner mirror for 20+ min twice (runs 39943850273).
+
+Cannot render / not available under Xvfb (observed or by construction):
+
+* Alt-revealed native menu bar (autoHideMenuBar + titleBarStyle hidden): pressing Alt shows NO menu bar (run 39943262981 dk01). Menu accelerators still work
+  (`ctrl+comma` -> Settings via the native menu, verified), so menu actions are drivable but the menu itself is not shown.
+* No window manager: no WM frame, snapping, alt-tab, window decorations beyond Electron's own titleBarOverlay (min/max/close drawn by Chromium).
+* Native folder-pick dialog (GTK portal / xdg-desktop-portal: no dbus session, "Failed to connect to the bus" in the log): not exercised; the drivers add projects by typing a path in the command palette.
+* No system tray, notifications daemon, Dock/menu-bar-extra, OS secure storage (basic_text via `--password-store=basic`), GPU (software GL; "dri3 extension not supported"),
+  auto-update (disabled), `t3code://` URL-handler registration / xdg-open, drag and drop from a file manager, IME.
+* Right-click gives Chromium's native Cut/Copy/Paste/Select All popup (visible in root captures only); the sidebar thread row has no thread-specific native menu here.
+
 ## Known limits
 
 * Only the ACP flavor (grok) is implemented. Codex / pi / claude / opencode adapters and mobile/desktop are not built.

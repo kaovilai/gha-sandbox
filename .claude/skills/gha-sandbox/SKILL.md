@@ -47,6 +47,7 @@ Scenario tips: mask nondeterministic text (runner hostname), dismiss banners, no
 ## t3code specifics
 
 - Web: pairs via `pairingUrl:` log line. Provider banner "Codex provider status" (no CLI on runner) → scenario dismisses.
+- Desktop mock: `gh workflow run desktop-linux.yml --repo kaovilai/gha-sandbox --ref <br> -f mock=true -f scenarios=desktop` (web drivers inside real Electron via CDP + xdotool, x11grab video; see mockkit/README.md Desktop). Packs/ids: s03,s06,s08,dk01-dk03.
 - Desktop: run built app (`build:desktop` + `start:desktop`); dev mode opens DevTools. Onboarding: Enter x5 then click (832,577) "Do not import projects".
 - Mobile: upstream `scripts/mobile-showcase.ts` (seeded, keyless). Our patches to throwaway checkout: scene timeouts, loopback Metro host, exact-bundle warm (`patch-showcase-warm.py`), caching manifest proxy `scripts/metro-manifest-proxy.mjs` (dev launcher 10 s timeout, HEAD probe).
 - iOS pairing intermittently fails ("No environments connected"); see README.
