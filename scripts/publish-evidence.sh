@@ -21,9 +21,9 @@ while IFS= read -r -d '' f; do
     *.mp4|*.webm)
       base=${flat%.*}
       # Long recordings: keep the last 30 s (-sseof is a no-op for shorter clips).
-      timeout 300 ffmpeg -nostdin -loglevel error -y -sseof -30 -i "$f" -c:v libx264 -pix_fmt yuv420p "$pub/$base.mp4"
+      timeout 300 ffmpeg -nostdin -loglevel error -y -sseof -30 -i "$f" -c:v libx264 -pix_fmt yuv420p "$pub/$base.mp4" || echo "WARN: mp4 trim failed for $f"
       # GIF for inline embedding: last 15 s, <=480 px wide, 8 fps.
-      timeout 300 ffmpeg -nostdin -loglevel error -y -sseof -15 -i "$f" -vf "fps=8,scale='min(480,iw)':-1:flags=lanczos" "$pub/$base.gif"
+      { timeout 300 ffmpeg -nostdin -loglevel error -y -sseof -15 -i "$f" -vf "fps=8,scale='min(480,iw)':-1:flags=lanczos" "$pub/$base.gif" || timeout 300 ffmpeg -nostdin -loglevel error -y -i "$f" -t 15 -vf "fps=8,scale='min(480,iw)':-1:flags=lanczos" "$pub/$base.gif"; } || echo "WARN: gif failed for $f"
       ;;
   esac
 done < <(find "$src" -type f \( -name '*.png' -o -name '*.mp4' -o -name '*.webm' \) -print0)
