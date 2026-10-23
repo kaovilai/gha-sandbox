@@ -20,6 +20,11 @@ on:
         description: After the showcase pass, drive LIVE mockkit threads in the app (implies keep_running)
         type: boolean
         default: false
+      mock_provider:
+        description: "Live mode only. Mock provider flavor: grok (ACP mock, default) | codex (Codex app-server mock: OpenAI icon, GPT-6-Astra) | both. See mockkit/README.md"
+        type: choice
+        options: [grok, codex, both]
+        default: grok
 
 permissions:
   contents: read
@@ -33,6 +38,7 @@ jobs:
       OUT_DIR: ${{ github.workspace }}/out/ios-app
       IOS_KEEP_RUNNING: ${{ (inputs.keep_running || inputs.live) && '1' || '0' }}
       IOS_LIVE: ${{ inputs.live && '1' || '0' }}
+      MOCK_PROVIDER: ${{ inputs.mock_provider }}
     steps:
       - uses: actions/checkout@v4
 

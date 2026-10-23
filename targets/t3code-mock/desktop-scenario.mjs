@@ -1,4 +1,5 @@
 // Runs mockkit UI drivers INSIDE the real t3code Electron window (built app, Xvfb), one isolated app per scenario.
+//   MOCK_PROVIDER = grok (default) | codex | both: provider flavor the drivers run against (see resolveIds).
 //   SCENARIOS = comma list: driver ids, short prefixes ("s03", "dk02"), or pack names from mockkit/packs.json ("desktop", ...).
 // Web drivers (mockkit/scenarios-ui) are reused unchanged: Playwright attaches over CDP (connectOverCDP) to the Electron renderer.
 // Desktop-only drivers (mockkit/scenarios-desktop, ids dk*) additionally get `native` (xdotool + real-desktop shots).
@@ -10,6 +11,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, write
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
+import { labelOf, resolveScenarios } from "../../mockkit/lib/resolve.mjs";
 import { bootDesktop } from "../../mockkit/lib/desktop.mjs";
 import { native, rootShot, sleep, windowTree } from "../../mockkit/lib/native.mjs";
 import { assertShell, dumpPage } from "../../mockkit/lib/ui.mjs";
@@ -26,20 +28,12 @@ const found = new Map(); // id -> file
 for (const d of dirs) for (const f of existsSync(d) ? readdirSync(d) : []) if (f.endsWith(".mjs")) found.set(f.slice(0, -4), join(d, f));
 const drivers = [...found.keys()].sort();
 const packs = JSON.parse(readFileSync(join(here, "../../mockkit/packs.json"), "utf8"));
-function resolveIds(spec) {
-  const ids = [];
-  for (const tok of spec.split(",").map((s) => s.trim()).filter(Boolean)) {
-    const list = packs[tok] ? (packs[tok] === "*" ? drivers : packs[tok]) : [tok];
-    for (const t of list) {
-      const hit = found.has(t) ? [t] : drivers.filter((d) => d.startsWith(`${t}-`));
-      ids.push(hit.length === 1 ? hit[0] : t); // unknown/ambiguous: reported as FAIL below
-    }
-  }
-  return [...new Set(ids)];
-}
+// Provider flavor per scenario (mockkit/lib/resolve.mjs): "@codex" suffix, a "codex" pack (codex, desktop-codex), or env MOCK_PROVIDER.
+const envProv = (process.env.MOCK_PROVIDER || "grok").toLowerCase();
+const resolveIds = (spec) => resolveScenarios(spec, { packs, found, drivers, envProv });
 const spec = (process.env.SCENARIOS || "").trim() || "desktop";
 const ids = resolveIds(spec);
-console.log(`desktop scenarios (${spec}): ${ids.join(" ")}`);
+console.log(`desktop scenarios (${spec}, MOCK_PROVIDER=${envProv}): ${ids.map(labelOf).join(" ")}`);
 mkdirSync(out, { recursive: true });
 
 // ffmpeg x11grab of the whole display; stop() asks ffmpeg to finalize ('q') so the mp4 is playable.
@@ -91,26 +85,29 @@ function printMockFrames(mockLog, id) {
 
 const results = [];
 let bootFailures = 0;
-for (const id of ids) {
+for (const entry of ids) {
+  const id = labelOf(entry); // evidence file prefix ("codex-<driver>" for Codex runs)
   if (bootFailures >= 2) {
     console.log(`RESULT ${id} SKIP (2 consecutive boot failures; not burning CI minutes)`);
     results.push([id, false]);
     continue;
   }
-  const file = found.get(id);
+  const file = found.get(entry.id);
   if (!file) {
     console.log(`RESULT ${id} FAIL (no driver; known: ${drivers.join(", ")}; packs: ${Object.keys(packs).join(", ")})`);
     results.push([id, false]);
     continue;
   }
   const mod = await import(pathToFileURL(file).href);
-  console.log(`::group::desktop scenario ${id}`);
+  console.log(`::group::desktop scenario ${id} (provider ${entry.prov})`);
   let ok = true;
   let app;
   let rec;
   let browser;
   try {
     try {
+      // seed/settings.mjs (run by bootDesktop) reads MOCK_PROVIDER: which mock providers are READY; the driver runs against entry.prov
+      process.env.MOCK_PROVIDER = mod.meta?.seed?.[entry.prov] ?? entry.prov;
       app = await bootDesktop({ id });
       bootFailures = 0;
     } catch (e) {
@@ -122,7 +119,7 @@ for (const id of ids) {
     const page = att.page;
     await assertShell(page, `desktop shell (${id})`, 90_000);
     const nat = native(app.win);
-    const env = { ...process.env, MOCKKIT_WS: app.ws, MOCK_CONTROL_DIR: app.ctl, MOCK_LOG: app.mockLog };
+    const env = { ...process.env, MOCKKIT_PROVIDER: entry.prov, MOCKKIT_WS: app.ws, MOCK_CONTROL_DIR: app.ctl, MOCK_LOG: app.mockLog };
     process.env.APP_URL = page.url();
     writeFileSync(join(out, `${id}-windows.txt`), windowTree());
     rec = startRecording(join(out, `${id}.mp4`));

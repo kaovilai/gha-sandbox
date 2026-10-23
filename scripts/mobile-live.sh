@@ -8,7 +8,10 @@
 #   3. drive the app (tap rows/buttons by label), poll the UI tree (uiautomator dump | AXe describe-ui) and the server
 #      (`thread show --json`), screenshot + record each scenario.
 # Scenarios: s40 live streaming turn, s41 approval tap + resolve, s42 user-question card.
-# Env: LIVE_OUT (output dir, required), LIVE_SCENARIOS (default "s40 s41 s42"), MOCK_PACE.
+# Env: LIVE_OUT (output dir, required), LIVE_SCENARIOS (default "s40 s41 s42"), MOCK_PACE,
+#   MOCK_PROVIDER = grok (default) | codex | both: provider flavor of the threads. grok: Grok mock (titles "Mock ...", provider grok /
+#   grok-build, files in $LIVE_OUT). codex: Codex app-server mock (titles "Codex ...", provider codex / gpt-6-astra, files in
+#   $LIVE_OUT/codex/). both: grok pass, then codex pass (same server, same app session).
 set -uo pipefail
 plat=${1:?android|ios}
 sroot=${2:?showcase root}
@@ -21,6 +24,20 @@ bd="$sroot/environments/moonbase-terminal"
 ws="$bd/workspace/t3code"
 pkg=com.t3tools.t3code
 scenarios=${LIVE_SCENARIOS:-"s40 s41 s42"}
+live_root=$out
+case "$(echo "${MOCK_PROVIDER:-grok}" | tr 'A-Z' 'a-z')" in
+  codex) mock_provider=codex; providers="codex" ;;
+  both)  mock_provider=both;  providers="grok codex" ;;
+  *)     mock_provider=grok;  providers="grok" ;;
+esac
+# per-pass flavor (set by use_provider): PROV/MODEL = server CLI --provider/--model, TP = thread title prefix
+PROV=grok MODEL=grok-build TP=Mock PROV_BAD=0
+use_provider() {
+  PROV=$1
+  if [ "$1" = codex ]; then MODEL=gpt-6-astra TP=Codex out="$live_root/codex"; else MODEL=grok-build TP=Mock out="$live_root"; fi
+  mkdir -p "$out/ui"
+  navs=0
+}
 
 export MOCK_CONTROL_DIR=${RUNNER_TEMP:-/tmp}/mockkit-live/control
 export MOCK_LOG="$out/mock.ndjson"
@@ -130,6 +147,8 @@ server_truth() {
   local j; j=$(show_json "$2" | grep '^{' | head -1)
   [ -n "$j" ] || { log "server_truth($1): no json ($(head -c 300 "$out/show.err"))"; return 1; }
   echo "{\"label\":\"$1\",\"at\":\"$(date +%T)\",\"data\":$j}" >> "$out/server-truth.ndjson"
+  local prov; prov=$(echo "$j" | jq -r '.thread.providerInstanceId // empty')
+  [ "$prov" = "$PROV" ] || { log "PROVIDER MISMATCH: thread $2 runs on '$prov', expected '$PROV'"; PROV_BAD=1; }
   log "SERVER[$1] $(echo "$j" | jq -c '{status:.thread.status,pending:.thread.pendingRequestCount,provider:.thread.providerInstanceId,model:.thread.model,last:[.messages[-2:][]|{role,text:(.text|.[0:70])}]}')"
   SRV_STATUS=$(echo "$j" | jq -r '.thread.status')
   SRV_PENDING=$(echo "$j" | jq -r '.thread.pendingRequestCount')
@@ -138,7 +157,7 @@ server_truth() {
 start_thread() { # <title> <prompt> -> threadId
   local i o id
   for i in $(seq 1 12); do
-    o=$(t3 thread start --base-dir "$bd" --title "$1" --provider grok --model grok-build --json t3code "$2" 2>"$out/start.err")
+    o=$(t3 thread start --base-dir "$bd" --title "$1" --provider "$PROV" --model "$MODEL" --json t3code "$2" 2>"$out/start.err")
     id=$(echo "$o" | grep '^{' | head -1 | jq -r '.threadId // empty' 2>/dev/null)
     [ -n "$id" ] && { echo "$id"; return 0; }
     log "thread start try $i failed: $(head -c 300 "$out/start.err") $o"
@@ -180,14 +199,15 @@ open_thread() { # <title>
 
 results=()
 record_result() { results+=("$1=$2"); echo "LIVE RESULT $1 $2"; }
+rlabel() { [ "$PROV" = codex ] && echo "codex-$1" || echo "$1"; }
 
 # ---- 1. seed the mock provider into the running showcase server ---------------------------------------------------
 log "base dir $bd"
 ls "$bd/userdata" >&2
 chmod +x "$kit/bin/mock-cli.sh"
-node "$kit/seed/settings.mjs" "$bd/userdata" || { fail "seed failed"; exit 4; }
+MOCK_PROVIDER=$mock_provider node "$kit/seed/settings.mjs" "$bd/userdata" || { fail "seed failed"; exit 4; }
 t0=$SECONDS
-until grep -q ' models' "$MOCK_CONTROL_DIR/probes.log" 2>/dev/null; do
+until grep -Eq ' (models|app-server)' "$MOCK_CONTROL_DIR/probes.log" 2>/dev/null; do
   (( SECONDS - t0 > 90 )) && { fail "T3 never probed the mock provider (probes.log empty)"; cat "$MOCK_CONTROL_DIR/probes.log" 2>&1; break; }
   sleep 2
 done
@@ -196,7 +216,7 @@ sleep 3
 
 # ---- scenarios ----------------------------------------------------------------------------------------------------
 run_s40() {
-  local title="Mock live stream" tid
+  local title="$TP live stream" tid
   next live-stream gate=g40 hold=live40
   rec_start s40
   tid=$(start_thread "$title" "Stream me a progress report.") || { rec_stop s40; return 1; }
@@ -240,7 +260,8 @@ run_s40() {
 }
 
 run_s41() {
-  local title="Mock approval" tid
+  local title="$TP approval" tid
+  rm -f "$ws/NOTES.md"
   next live-approval gate=g41
   rec_start s41
   tid=$(start_thread "$title" "Please write a notes file.") || { rec_stop s41; return 1; }
@@ -276,7 +297,7 @@ run_s41() {
 }
 
 run_s42() {
-  local title="Mock question" tid
+  local title="$TP question" tid
   next ask
   rec_start s42
   tid=$(start_thread "$title" "I want to tune the code style.") || { rec_stop s42; return 1; }
@@ -308,10 +329,17 @@ run_s42() {
 }
 
 shot 00-before
-for s in $scenarios; do
-  log "=== $s ==="
-  if "run_$s"; then record_result "$s" ok; else record_result "$s" fail; shot "$s-FAILED"; ui_state "$s-failed"; fi
+for P in $providers; do
+  use_provider "$P"
+  log "##### provider flavor: $P (out=$out)"
+  [ "$P" = codex ] && shot 00-before-codex
+  for s in $scenarios; do
+    log "=== $s ($P) ==="
+    PROV_BAD=0
+    if "run_$s" && [ "$PROV_BAD" = 0 ]; then record_result "$(rlabel "$s")" ok; else record_result "$(rlabel "$s")" fail; shot "$s-FAILED"; ui_state "$s-failed"; fi
+  done
 done
+out=$live_root
 log "results: ${results[*]}"
 printf '%s\n' "${results[@]}" > "$out/results.txt"
 cp "$MOCK_CONTROL_DIR/probes.log" "$out/probes.log" 2>/dev/null

@@ -15,6 +15,7 @@ const { resolveElectronLaunchCommand } = await import(pathToFileURL(join(desktop
 const cmd = resolveElectronLaunchCommand([...flags, "dist-electron/main.cjs"]) /* flags BEFORE the script, as dev-electron.mjs does */;
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
+console.log(`desktop-electron: MOCK_PROVIDER=${env.MOCK_PROVIDER ?? "grok"} MOCK_CLI_FLAVOR=${env.MOCK_CLI_FLAVOR ?? "-"}`);
 console.log(`desktop-electron: ${cmd.electronPath} ${cmd.args.join(" ")}`);
 const child = spawn(cmd.electronPath, cmd.args, { stdio: "inherit", cwd: desktopDir, env });
 child.on("exit", (code, signal) => process.exit(signal ? 1 : (code ?? 0)));
