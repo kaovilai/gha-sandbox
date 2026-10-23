@@ -98,6 +98,36 @@ T3CODE_OTEL_SDK_DISABLED=true T3CODE_NO_BROWSER=1 T3CODE_DISABLE_AUTO_UPDATE=tru
 * Selecting an option in the ask-user-question panel submits immediately.
 * The `<user_request>` wrapper is not needed for web turns in the cases seen; the parser handles both.
 
+## Mobile: live mock threads (S40-S42)
+
+`android-app.yml -f live=true` (and `ios-app.yml -f live=true`, best effort) run the upstream showcase with `--keep-running`, then
+`scripts/mobile-live.sh <android|ios> <showcaseRoot>` drives the already-paired app against the showcase's own server
+(`<root>/environments/moonbase-terminal`, project `t3code`). Default path (`live=false`) is untouched.
+
+1. Hot-seed `seed/settings.mjs` into `<baseDir>/userdata` with `MOCK_KEEP_OTHER_PROVIDERS=1` and `MOCK_DEFAULT_RUNTIME_MODE=approval-required`
+   (CLI-started threads take their mode from the environment default, so approvals are not auto-accepted).
+2. Start threads with the server CLI: `node apps/server/src/bin.ts thread start --base-dir <baseDir> --title T --provider grok --model grok-build --json t3code "<prompt>"`
+   (MCP `t3_thread_launch`); read truth with `thread show --json <id>` (`.thread.status`, `.pendingRequestCount`, assistant text).
+3. Hidden routing + gates: `mockctl next live-stream gate=g40 hold=live40 --cwd <workspace>`; the scenario waits on `gate` so the thread can be
+   opened in the app first, then `mockctl release g40`.
+4. UI state: `adb shell uiautomator dump` (Android) / `axe describe-ui` (iOS) parsed by `scripts/uia.mjs`; taps by label bounds.
+   Screenshots + `screenrecord`/`simctl recordVideo` clips land in `out/<platform>-app/live/`.
+5. `scripts/patch-showcase-live.py` (throwaway checkout, JS only): the showcase coordinator re-navigates to its fixture route whenever the
+   route's scene differs from the requested scene; the patch navigates once per scene request so manual taps/BACK stick.
+
+| id | scenario | proof |
+| --- | --- | --- |
+| S40 | `live-stream`: gate, steps 1-5, hold, steps 6-8 | timed shots (3 steps, 5 steps, held with "Working" + stop button, complete 8 steps), server status `running` then `completed` |
+| S41 | `live-approval`: gate then approval, tap **Approve** | card shot, resolved shot ("Approved: NOTES.md was written", +3 -0), `NOTES.md` exists in the workspace, pending 1 then 0 |
+| S42 | `ask`: tap option, **Submit answers** | card, option selected, answered, server `pending` 1 then 0 |
+
+Findings (Android, CI): (a) uiautomator cannot reach an idle tree while text streams in and then leaves the previous dump on disk;
+`dump()` deletes the file first, retries, and streaming growth is proven by screenshots + server text instead; (b) intermittently (2 of 4 Android runs), a pending approval or
+question that exists when a thread is opened is not rendered until the thread is remounted (BACK, reopen); the driver remounts once if the
+card is absent after the first wait;
+(c) approval buttons are `Cancel`, `Decline`, `Allow all edits this session`, `Approve` (not "Allow once"); (d) assistant markdown text
+nodes are sometimes absent from the accessibility tree, so final-state checks also read the server.
+
 ## Known limits
 
 * Only the ACP flavor (grok) is implemented. Codex / pi / claude / opencode adapters and mobile/desktop are not built.
