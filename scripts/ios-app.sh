@@ -15,19 +15,22 @@ perl -pi -e 's/waitForScene\(120_000\)/waitForScene(360_000)/; s/timeoutMs = 90_
 # for iOS) is unreachable from the simulator, leaving the dev launcher on "Searching...".
 perl -pi -e 's/const metroHost = hasIos \? lanIpv4Address\(\) : "127\.0\.0\.1";/const metroHost = "127.0.0.1";/' scripts/mobile-showcase.ts
 grep -q 'const metroHost = "127.0.0.1";' scripts/mobile-showcase.ts || echo "WARN: metroHost patch did not apply"
-python3 "$root/scripts/patch-showcase-ios.py" scripts/mobile-showcase.ts
+[ "${IOS_DEEPLINK:-0}" = 1 ] && python3 "$root/scripts/patch-showcase-ios.py" scripts/mobile-showcase.ts || true
 # Diagnostics: periodic simulator screenshots + app log, to see why a scene never renders.
 mkdir -p "$out/diag"
 ( i=0; while :; do sleep 45; i=$((i+1)); xcrun simctl io booted screenshot "$out/diag/t$(printf %03d "$i").png" >/dev/null 2>&1 || true; done ) &
 diag1=$!
-( until xcrun simctl list devices | grep -q '(Booted)'; do sleep 2; done
-  xcrun simctl spawn booted log stream --level debug --style compact \
-    --predicate 'process == "T3Code" OR process == "SpringBoard" OR subsystem == "com.apple.CFNetwork"' > "$out/diag/app.log" 2>&1 ) &
+( until curl -s -o /dev/null http://127.0.0.1:8199/status; do sleep 2; done
+  while :; do
+    printf '%s ' "$(date -u +%T)" >> "$out/diag/metro-timing.log"
+    curl -s -o /dev/null -m 60 -H 'expo-platform: ios' -w 'manifest=%{http_code} %{time_total}s\n' \
+      http://127.0.0.1:8199/ >> "$out/diag/metro-timing.log" 2>&1 || echo "curl failed" >> "$out/diag/metro-timing.log"
+    sleep 15
+  done ) &
 diag2=$!
 pnpm screenshots:mobile "${args[@]}" 2>&1 | tee "$out/pass1.log"
 rc1=${PIPESTATUS[0]}
 kill "$diag1" "$diag2" 2>/dev/null || true
-pkill -f 'simctl spawn booted log stream' 2>/dev/null || true
 mkdir -p "$out/screenshots"
 cp -r artifacts/app-store/screenshots/apple/. "$out/screenshots/" 2>/dev/null || true
 
