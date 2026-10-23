@@ -400,6 +400,18 @@ test("CLI surface: --version, mcp list --json (config flags first), launcher rou
   assert.equal(bad.status, 1);
 });
 
+test("tokens=<n> queue/tag arg forces the turn's input tokens (context-window meter)", async () => {
+  const c = client();
+  await boot(c);
+  const threadId = await startThread(c);
+  await c.request("turn/start", turnParams(threadId, c.cwd, "[mock:echo tokens=190000] big"));
+  await c.note("turn/completed");
+  const u = c.frames.find((f) => f.method === "thread/tokenUsage/updated").params.tokenUsage;
+  assert.equal(u.last.inputTokens, 190000);
+  assert.equal(u.modelContextWindow, 258400);
+  c.close();
+});
+
 test("unifiedDiff: single hunk with context", () => {
   const d = unifiedDiff("a\nb\nc\nd\ne\nf\ng\n", "a\nb\nc\nX\ne\nf\ng\n");
   assert.equal(d, "@@ -1,7 +1,7 @@\n a\n b\n c\n-d\n+X\n e\n f\n g\n");

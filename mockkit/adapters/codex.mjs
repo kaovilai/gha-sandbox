@@ -473,8 +473,10 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
     t.history.push(ctx.text);
     t.abort = null;
     t.activeTurnId = null;
-    // token usage (deterministic: ~4 chars/token; input grows with the history)
-    const inTok = 1200 + 380 * t.history.length + Math.ceil(raw.length / 4);
+    // token usage (deterministic: ~4 chars/token; input grows with the history). Scenario arg `tokens=<n>` (queue/tag arg)
+    // forces this turn's input size, e.g. to fill the context-window meter.
+    const forced = Number(ctx.args.tokens);
+    const inTok = Number.isFinite(forced) && forced > 0 ? forced : 1200 + 380 * t.history.length + Math.ceil(raw.length / 4);
     const outTok = Math.ceil(rt.outChars() / 4);
     t.tokens = { input: t.tokens.input + inTok, output: t.tokens.output + outTok, cached: t.tokens.cached + Math.floor(inTok * 0.6) };
     const usage = (inp, out, cached) => ({ totalTokens: inp + out, inputTokens: inp, cachedInputTokens: cached, cacheWriteInputTokens: 0, outputTokens: out, reasoningOutputTokens: 0 });
@@ -484,12 +486,14 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
       tokenUsage: { total: usage(t.tokens.input, t.tokens.output, t.tokens.cached), last: usage(inTok, outTok, Math.floor(inTok * 0.6)), modelContextWindow: CONTEXT_WINDOW },
     });
     if (error) {
-      notify("error", { threadId: t.id, turnId, willRetry: false, error });
       if (error.codexErrorInfo === "usageLimitExceeded") {
+        // Rate limits first (and a beat to be processed): T3 reads the reset time from the latest snapshot when it terminalizes the turn.
         notify("account/rateLimits/updated", {
           rateLimits: { limitId: "codex", limitName: null, planType: "plus", primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: nowSec() + 3 * 3600 }, secondary: { usedPercent: 62, windowDurationMins: 10080, resetsAt: nowSec() + 4 * 86400 }, rateLimitReachedType: "primary" },
         });
+        await new Promise((r) => setTimeout(r, 300));
       }
+      notify("error", { threadId: t.id, turnId, willRetry: false, error });
     }
     notify("thread/status/changed", { threadId: t.id, status: { type: "idle" } });
     const doneAt = nowSec();
