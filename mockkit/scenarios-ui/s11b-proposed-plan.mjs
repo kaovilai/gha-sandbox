@@ -3,6 +3,14 @@ import { readFileSync } from "node:fs";
 import { ask, dumpPage, providerOf, startSession } from "../lib/ui.mjs";
 
 export default async function ({ page, shot, env }) {
+  if (providerOf(env) === "claude") {
+    // Plan/Chat mode UI is an opt-in client setting (planModeEnabled) AND needs a provider that allows it (Claude does, Grok does not).
+    // Page-level init scripts run after the context-level skipOnboarding one, so this overrides its localStorage value on reload.
+    await page.addInitScript(() => {
+      localStorage.setItem("t3code:client-settings:v1", JSON.stringify({ onboardingCompletedAt: "2026-01-01T00:00:00.000Z", planModeEnabled: true }));
+    });
+    await page.reload({ waitUntil: "load" });
+  }
   await startSession(page, env);
   const toggle = page.locator('button[aria-label*="enter plan mode"]').first();
   let planOn = false;

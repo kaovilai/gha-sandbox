@@ -33,6 +33,7 @@ and makes the mock the default model). `MOCK_KEEP_OTHER_PROVIDERS=1` keeps them.
 | `adapters/acp.mjs` | ACP agent: initialize, authenticate, session/new\|load\|resume\|close, set_model, set_config_option, prompt, cancel, request_permission, `_x.ai/ask_user_question` |
 | `bin/t3-mock-acp.mjs`, `bin/mock-cli.sh` | entrypoint; fake grok launcher (`--version`, `models`, `inspect --json`, `agent stdio`); also routes the Codex flavor (below) |
 | `adapters/codex.mjs`, `bin/t3-mock-codex.mjs`, `lib/textgen.mjs` | Codex app-server + `exec` text generation on the same IR (section "Codex adapter") |
+| `adapters/claude.mjs`, `bin/t3-mock-claude.mjs` | Claude stream-json CLI (Agent SDK) + `-p` text generation on the same IR (section "Claude adapter"); `test/claude.test.mjs` |
 | `seed/settings.mjs`, `seed/workspace.sh` | write `settings.json` (+ `client-settings.json`) and create the demo workspace repo |
 | `scenarios/*.mjs` | mock scripts: echo, markdown-stream, think, tool-read, edit-file-diff, approval-allow, error-turn, shell, slow, ask, plan |
 | `scenarios-ui/<id>.mjs` | Playwright drivers (`export default async ({page, shot, env}) => ...`) |
@@ -107,7 +108,7 @@ become the scenario's `title`, so the sidebar reads "Failing turn", "Approval re
 
 `MOCK_LOG` (NDJSON), `MOCK_PACE` (fast/real/slow), `MOCK_SEED`, `MOCK_DEFAULT_SCENARIO`, `MOCK_CONTROL_DIR`,
 `MOCK_HOLD_TIMEOUT_MS`, `MOCK_CLI_MODE` (ready/unauth/old/broken/missing, launcher probe output),
-`MOCK_KEEP_OTHER_PROVIDERS`, `MOCK_NODE`, `MOCK_PROVIDER` (grok|codex|both), `MOCK_CLI_FLAVOR` (codex), `MOCK_CODEX_ACCOUNT` (apiKey|chatgpt). Baseline no-cloud env set by `lib/boot.mjs`: `T3CODE_TELEMETRY_ENABLED=false
+`MOCK_KEEP_OTHER_PROVIDERS`, `MOCK_NODE`, `MOCK_PROVIDER` (grok|codex|claude|both|all|a+b), `MOCK_CLI_FLAVOR` (codex|claude), `MOCK_CODEX_ACCOUNT` (apiKey|chatgpt). Baseline no-cloud env set by `lib/boot.mjs`: `T3CODE_TELEMETRY_ENABLED=false
 T3CODE_OTEL_SDK_DISABLED=true T3CODE_NO_BROWSER=1 T3CODE_DISABLE_AUTO_UPDATE=true`.
 
 ## Findings (verified in CI)
@@ -226,9 +227,57 @@ Frame shapes come from the upstream recorded transcripts (`orchestration-v2/test
   echo answer, same as Grok. Sidebar thread titles come from the prompt text, not the scenario title (hidden routing has no tag). Real `codex` behaviour that depends on a
   model (planning, tool choice) is not simulated.
 
+## Claude adapter
+
+A third protocol flavor on the same scenario IR: T3's `claudeAgent` driver (Claude icon, "Claude Opus/Sonnet/Fable/Haiku 5.x" model picker, Settings > Providers card
+"Authenticated · Claude Max Subscription", effort picker, Plan/Chat toggle), fully keyless: no `ANTHROPIC_API_KEY`, no credentials, no network.
+
+```
+T3 claudeAgent driver ──Agent SDK spawns──▶ <binaryPath> --output-format stream-json --verbose --input-format stream-json
+                                              [--permission-mode M] [--session-id=ID | --resume=ID] [--model M] --permission-prompt-tool stdio ...
+                                              = mockkit/bin/mock-cli.sh (MOCK_CLI_FLAVOR=claude, or argv --output-format/--input-format/auth)
+                                                   └─▶ bin/t3-mock-claude.mjs ──▶ adapters/claude.mjs   (stream-json: control_request/response + SDK messages)
+version probe ──▶ <binaryPath> --version                    "2.1.300 (Claude Code)"  (>= every current model's minVersion in T3's manifest)
+text generation ──▶ <binaryPath> -p --output-format json --json-schema S ...   prompt on stdin, {"type":"result","structured_output":{..}} on stdout
+```
+
+Protocol recon: `@anthropic-ai/claude-agent-sdk` 0.3.276 (`sdk.mjs` / `sdk.d.ts`: spawn args, control-request subtypes, `can_use_tool` shape) and T3's
+`orchestration-v2/Adapters/ClaudeAdapterV2.ts` + `testkit/fixtures/claude_*` (message shapes). The adapter was also driven with the REAL SDK
+(`query({pathToClaudeCodeExecutable})`, same code path as T3; `ctl/claude-sdk-drive.mjs`, manual, needs the SDK installed) in addition to the hand-written-frame unit tests.
+
+* **Provider selection.** `MOCK_PROVIDER=claude` (read by `seed/settings.mjs`) writes `providerInstances.claudeAgent` enabled (`config.binaryPath` = launcher, env
+  `MOCK_CLI_FLAVOR=claude`), disables grok/codex, and points `textGenerationModelSelection` at `claudeAgent` / `claude-haiku-5-5`. `all` = grok+codex+claude, `both` is still
+  grok+codex, and any `+` list works (`claude+grok`; first entry = text-generation provider). `MOCK_CLI_MODE=unauth|old|broken|missing` varies the probe (signed out /
+  v2.0.1 outdated / non-zero exit / binary absent). `seedInstances` accepts `driver: "claudeAgent"` for extra instances (S18).
+* **Driver selection in CI.** `scenarios=claude` (pack: 20 drivers) | `claude-smoke` | `s03@claude,s08@claude` (`@claude` suffix) | env `MOCK_PROVIDER=claude`. Runs are named
+  `claude-<driver>` (`after-claude-s03-markdown-stream-done.png`). The same driver files run for every provider (`providerOf(env) === "claude"` branches: S11b plan toggle in the
+  composer overflow menu, S14, S18, S20); Claude-only drivers: `s22-session-resume`, `s23-slash-commands` (they print a FINDING and return for other providers).
+* **Probe.** `--version`; then the SDK `initialize` control request -> `{commands, agents, models, account:{email, subscriptionType:"max", tokenSource:"claude.ai", apiProvider:"firstParty",
+  apiKeySource:"none"}}` (T3 reads auth from this; `unauth` mode reports `tokenSource:"none"` -> "Claude Code is not authenticated"); `get_usage` -> 5-hour 23% / 7-day 41% windows;
+  `mcp_set_servers` (T3 registers its own `t3-code` MCP server on every session) -> `{added:[...]}`; `set_model`, `set_permission_mode`, `interrupt`, `apply_flag_settings`, `stop_task`... -> success,
+  anything else -> `control_response` error (never a hang). `claude auth status` -> JSON `{loggedIn, authMethod:"claude.ai", ...}`.
+* **Turns.** Each `user` message runs one scenario (tag `[mock:id]`, else the hidden per-cwd `mockctl next` queue, else `echo`): `system init` (model, permissionMode, session id) ->
+  `stream_event`s -> `assistant` snapshot per content block (own `uuid`, T3 keys text by it) -> `user` tool_result frames -> `result` (usage, `modelUsage`, `user_message_uuid` echo, `terminal_reason`).
+  IR mapping: `say` -> text block (`text_delta`s + snapshot), `think` -> thinking block (T3 renders `thinking_delta` live), `read` -> `Read` + numbered result, `fsWrite` -> `Edit`
+  (smallest old/new region) or `Write` (REAL write, `structuredPatch`), `sh` -> `Bash` (REAL `sh -c`, `{stdout,stderr,interrupted}`), generic `tool` kinds -> `Grep` / `mcp__mockkit__*`, `plan` -> `TodoWrite`
+  (Tasks panel), `exitPlan` -> `ExitPlanMode {plan}` + `can_use_tool` (T3 captures the plan and denies, exactly as with the real CLI), `ask` -> `AskUserQuestion` + `can_use_tool`
+  (answers `{questionText: label}`), `error` -> synthetic assistant `API Error: ...` + `is_error` result, `error{kind:"usage_limit"}` -> `rate_limit_event` (rejected, `five_hour`, resetsAt) + assistant
+  `error:"rate_limit"` + `blocking_limit` result (T3: "Claude usage limit reached ... resets in 3h", Limited sidebar badge, Resume/Snooze bar), `hold` / queue / `tokens=<n>` unchanged.
+* **Permissions follow Claude Code semantics:** `permission` steps send `can_use_tool` (title "Claude wants to create/run/edit ...", `permission_suggestions` setMode acceptEdits / addRules) only in
+  `default`/`plan` mode. `bypassPermissions` ("Full access") and `dontAsk` never ask, `acceptEdits` auto-allows Edit/Write, an accepted `addRules` / `setMode` suggestion is remembered; `AskUserQuestion` and
+  `ExitPlanMode` always ask. Approval drivers switch the composer to "Supervised". `set_permission_mode` at runtime is honored.
+* **Interrupt / resume.** `interrupt` aborts the running turn -> `error_during_execution` result (T3: "Run interrupted by user"). Session state (turn count, history, model, mode) is persisted under
+  `$MOCK_CONTROL_DIR/claude-sessions/<id>.json`, so a respawn with `--resume=<id>` (S22) keeps counting.
+* **Text generation.** `-p ... --json-schema S`: JSON for the schema's `properties` keys (shared `lib/textgen.mjs`; titles from the scenario, commit subject "Update files via mock agent", S24).
+* **Limits (honest).** T3 renders assistant text only from the completed `assistant` snapshot (it ignores `text_delta`), so Claude text appears per finished block, not word by word: the mock closes a
+  text block after 350 ms without a delta so held/paused turns still show their text, and a long single `say` (S03) shows up whole. Thinking and tool rows do stream live. Model names, version and the
+  context window ("190k/1m") come from T3's bundled manifest, not from the mock; every answer is scripted. No subagents (`Agent` tool), background tasks, hooks, MCP tool calls, skills, `/compact` execution
+  (T3 adds the command itself), file checkpointing / rewind, image blocks or `get_context_usage` realism. The tool path in approval cards is the absolute runner path (Claude sends absolute `file_path`).
+  Settings > Providers still lists the disabled built-in Codex/Grok rows, and S20 deliberately seeds Grok next to Claude.
+
 ## Known limits
 
-* ACP (grok) and Codex (`app-server`) flavors are implemented. pi / claude / opencode adapters are not built (see "Codex adapter" for Codex limits).
+* ACP (grok), Codex (`app-server`) and Claude (`stream-json`) flavors are implemented. pi / opencode adapters are not built (see "Codex adapter" / "Claude adapter" for their limits).
 * Standard ACP `plan` renders as a todo list; a ProposedPlanCard comes from the xAI `exit_plan_mode` request (IR step `exitPlan`, scenario `exit-plan`, S11b).
 * The `acpRegistry` driver does not map upstream xAI rate-limit frames; use the grok driver (`MOCK_UPSTREAM_AGENT`) for S14.
 * T3 (web) does not render streamed stdout of an in-progress command: the row reads "Running command" and is not expandable until the
