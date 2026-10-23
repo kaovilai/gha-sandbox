@@ -8,7 +8,10 @@
 #   3. drive the app (tap rows/buttons by label), poll the UI tree (uiautomator dump | AXe describe-ui) and the server
 #      (`thread show --json`), screenshot + record each scenario.
 # Scenarios: s40 live streaming turn, s41 approval tap + resolve, s42 user-question card.
-# Env: LIVE_OUT (output dir, required), LIVE_SCENARIOS (default "s40 s41 s42"), MOCK_PACE.
+# Env: LIVE_OUT (output dir, required), LIVE_SCENARIOS (default "s40 s41 s42"), MOCK_PACE,
+#   MOCK_PROVIDER = grok (default) | codex | both: provider flavor of the threads. grok: Grok mock (titles "Mock ...", provider grok /
+#   grok-build, files in $LIVE_OUT). codex: Codex app-server mock (titles "Codex ...", provider codex / gpt-6-astra, files in
+#   $LIVE_OUT/codex/). both: grok pass, then codex pass (same server, same app session).
 set -uo pipefail
 plat=${1:?android|ios}
 sroot=${2:?showcase root}
@@ -21,10 +24,26 @@ bd="$sroot/environments/moonbase-terminal"
 ws="$bd/workspace/t3code"
 pkg=com.t3tools.t3code
 scenarios=${LIVE_SCENARIOS:-"s40 s41 s42"}
+live_root=$out
+case "$(echo "${MOCK_PROVIDER:-grok}" | tr 'A-Z' 'a-z')" in
+  codex) mock_provider=codex; providers="codex" ;;
+  both)  mock_provider=both;  providers="grok codex" ;;
+  *)     mock_provider=grok;  providers="grok" ;;
+esac
+# per-pass flavor (set by use_provider): PROV/MODEL = server CLI --provider/--model, TP = thread title prefix
+PROV=grok MODEL=grok-build TP=Mock PROV_BAD=0
+use_provider() {
+  PROV=$1
+  if [ "$1" = codex ]; then MODEL=gpt-6-astra TP=Codex out="$live_root/codex"; else MODEL=grok-build TP=Mock out="$live_root"; fi
+  mkdir -p "$out/ui"
+  navs=0
+}
 
 export MOCK_CONTROL_DIR=${RUNNER_TEMP:-/tmp}/mockkit-live/control
 export MOCK_LOG="$out/mock.ndjson"
 export MOCK_PACE=${MOCK_PACE:-real}
+# slow runners: CLI polls + UI dumps (and the remount fallbacks below) can take minutes between a hold being reached and released
+export MOCK_HOLD_TIMEOUT_MS=${MOCK_HOLD_TIMEOUT_MS:-900000}
 export MOCK_KEEP_OTHER_PROVIDERS=1
 export MOCK_DEFAULT_RUNTIME_MODE=approval-required
 rm -rf "$MOCK_CONTROL_DIR"; mkdir -p "$MOCK_CONTROL_DIR"
@@ -130,6 +149,8 @@ server_truth() {
   local j; j=$(show_json "$2" | grep '^{' | head -1)
   [ -n "$j" ] || { log "server_truth($1): no json ($(head -c 300 "$out/show.err"))"; return 1; }
   echo "{\"label\":\"$1\",\"at\":\"$(date +%T)\",\"data\":$j}" >> "$out/server-truth.ndjson"
+  local prov; prov=$(echo "$j" | jq -r '.thread.providerInstanceId // empty')
+  [ "$prov" = "$PROV" ] || { log "PROVIDER MISMATCH: thread $2 runs on '$prov', expected '$PROV'"; PROV_BAD=1; }
   log "SERVER[$1] $(echo "$j" | jq -c '{status:.thread.status,pending:.thread.pendingRequestCount,provider:.thread.providerInstanceId,model:.thread.model,last:[.messages[-2:][]|{role,text:(.text|.[0:70])}]}')"
   SRV_STATUS=$(echo "$j" | jq -r '.thread.status')
   SRV_PENDING=$(echo "$j" | jq -r '.thread.pendingRequestCount')
@@ -138,7 +159,7 @@ server_truth() {
 start_thread() { # <title> <prompt> -> threadId
   local i o id
   for i in $(seq 1 12); do
-    o=$(t3 thread start --base-dir "$bd" --title "$1" --provider grok --model grok-build --json t3code "$2" 2>"$out/start.err")
+    o=$(t3 thread start --base-dir "$bd" --title "$1" --provider "$PROV" --model "$MODEL" --json t3code "$2" 2>"$out/start.err")
     id=$(echo "$o" | grep '^{' | head -1 | jq -r '.threadId // empty' 2>/dev/null)
     [ -n "$id" ] && { echo "$id"; return 0; }
     log "thread start try $i failed: $(head -c 300 "$out/start.err") $o"
@@ -147,6 +168,9 @@ start_thread() { # <title> <prompt> -> threadId
   return 1
 }
 next() { node "$kit/ctl/mockctl.mjs" next "$@" --cwd "$ws"; }
+# gate/hold names (g40, live40, g41) are reused by every pass: a release file left by an earlier pass (grok, in `both` mode) would let the
+# next pass's turn run straight through its gate (codex-s40 then completes before the app opens the thread). Clear before each gated scenario.
+clear_gates() { rm -rf "$MOCK_CONTROL_DIR/release" "$MOCK_CONTROL_DIR/reached"; }
 # wait_server <threadId> <regex> <timeoutSec>: poll `thread show --json` until the assistant text matches
 wait_server() {
   local t0=$SECONDS j
@@ -175,19 +199,26 @@ open_thread() { # <title>
     wait_ui "$title" 60 "list-toggle-$navs" >/dev/null || return 1
   fi
   sleep 1
-  tap_re "$title" 20 "open-$navs"
+  # a running thread's list row animates ("Working Ns"): uiautomator then often returns an empty tree. If the tap target cannot be
+  # found, re-toggle the scene (thread -> threads; never BACK, which from the list leaves the app) and retry once.
+  tap_re "$title" 30 "open-$navs" && return 0
+  log "tap on '$title' failed; toggling scene thread -> threads and retrying"
+  write_scene thread; sleep 8; write_scene threads
+  sleep 2
+  tap_re "$title" 60 "open-retry-$navs"
 }
 
 results=()
 record_result() { results+=("$1=$2"); echo "LIVE RESULT $1 $2"; }
+rlabel() { [ "$PROV" = codex ] && echo "codex-$1" || echo "$1"; }
 
 # ---- 1. seed the mock provider into the running showcase server ---------------------------------------------------
 log "base dir $bd"
 ls "$bd/userdata" >&2
 chmod +x "$kit/bin/mock-cli.sh"
-node "$kit/seed/settings.mjs" "$bd/userdata" || { fail "seed failed"; exit 4; }
+MOCK_PROVIDER=$mock_provider node "$kit/seed/settings.mjs" "$bd/userdata" || { fail "seed failed"; exit 4; }
 t0=$SECONDS
-until grep -q ' models' "$MOCK_CONTROL_DIR/probes.log" 2>/dev/null; do
+until grep -Eq ' (models|app-server)' "$MOCK_CONTROL_DIR/probes.log" 2>/dev/null; do
   (( SECONDS - t0 > 90 )) && { fail "T3 never probed the mock provider (probes.log empty)"; cat "$MOCK_CONTROL_DIR/probes.log" 2>&1; break; }
   sleep 2
 done
@@ -196,7 +227,8 @@ sleep 3
 
 # ---- scenarios ----------------------------------------------------------------------------------------------------
 run_s40() {
-  local title="Mock live stream" tid
+  local title="$TP live stream" tid
+  clear_gates
   next live-stream gate=g40 hold=live40
   rec_start s40
   tid=$(start_thread "$title" "Stream me a progress report.") || { rec_stop s40; return 1; }
@@ -224,15 +256,28 @@ run_s40() {
   server_truth s40-held "$tid"
   local held_status=$SRV_STATUS
   log "early server text had: $(echo "$early_text" | grep -c '^Step') step line(s)"
-  wait_ui "Step 5 of 8" 30 s40-held-ui >/dev/null || { rec_stop s40; return 1; }
+  # A missing UI tree is NOT proof of anything: in CI run 40016905754/40019463438 (mock_provider=both) the held AND complete screenshots were
+  # blank (no assistant text) while server truth was fine, i.e. the app view was stale. So when the tree lacks the text, remount the thread
+  # (scene toggle, reopen) and require the text there; only then is the state proven in the UI. Never "ok" on server truth alone.
+  if ! wait_ui "Step 5 of 8" 30 s40-held-ui >/dev/null; then
+    log "UI lacks 'Step 5 of 8' while held (stale/blank thread view or uiautomator flake); remounting thread"
+    open_thread "$title" && wait_ui "Step 5 of 8" 45 s40-held-ui2 >/dev/null || { shot s40-held-NO-UI-PROOF; rec_stop s40; return 1; }
+    sleep 1
+    shot s40-streaming-held-remounted
+  fi
   # mid-turn means: UI has step 5 but not step 6, and the server still has the run open
-  node "$uia" find "Step 6 of 8" < "$out/ui/s40-held.dump" >/dev/null && log "UNEXPECTED: step 6 visible while held"
+  node "$uia" find "Step 6 of 8" < "$out/ui/last.dump" >/dev/null && log "UNEXPECTED: step 6 visible while held"
   node "$kit/ctl/mockctl.mjs" release live40
   wait_server "$tid" "Live stream complete" 90 || { rec_stop s40; return 1; }
   sleep 4
   shot s40-complete
   ui_state s40-complete
-  wait_ui "Live stream complete" 30 s40-done >/dev/null || { rec_stop s40; return 1; }
+  if ! wait_ui "Live stream complete" 30 s40-done >/dev/null; then
+    log "UI lacks 'Live stream complete' (stale/blank thread view or uiautomator flake); remounting thread"
+    open_thread "$title" && wait_ui "Live stream complete" 45 s40-done2 >/dev/null || { shot s40-complete-NO-UI-PROOF; rec_stop s40; return 1; }
+    sleep 1
+    shot s40-complete-remounted
+  fi
   server_truth s40-complete "$tid"
   rec_stop s40
   log "s40 server status held=$held_status final=$SRV_STATUS"
@@ -240,7 +285,9 @@ run_s40() {
 }
 
 run_s41() {
-  local title="Mock approval" tid
+  local title="$TP approval" tid
+  rm -f "$ws/NOTES.md"
+  clear_gates
   next live-approval gate=g41
   rec_start s41
   tid=$(start_thread "$title" "Please write a notes file.") || { rec_stop s41; return 1; }
@@ -262,7 +309,7 @@ run_s41() {
   ui_state s41-pending
   server_truth s41-pending "$tid"
   [ -e "$ws/NOTES.md" ] && log "UNEXPECTED: NOTES.md exists before approval"
-  tap_re "^Approve$" 20 s41-approve || { rec_stop s41; return 1; }
+  tap_re "^(Approve|Allow once)$" 20 s41-approve || { rec_stop s41; return 1; }
   wait_server "$tid" "Approved" 90 || { shot s41-no-resolution; rec_stop s41; return 1; }
   sleep 4
   shot s41-approval-resolved
@@ -276,7 +323,7 @@ run_s41() {
 }
 
 run_s42() {
-  local title="Mock question" tid
+  local title="$TP question" tid
   next ask
   rec_start s42
   tid=$(start_thread "$title" "I want to tune the code style.") || { rec_stop s42; return 1; }
@@ -308,10 +355,17 @@ run_s42() {
 }
 
 shot 00-before
-for s in $scenarios; do
-  log "=== $s ==="
-  if "run_$s"; then record_result "$s" ok; else record_result "$s" fail; shot "$s-FAILED"; ui_state "$s-failed"; fi
+for P in $providers; do
+  use_provider "$P"
+  log "##### provider flavor: $P (out=$out)"
+  [ "$P" = codex ] && shot 00-before-codex
+  for s in $scenarios; do
+    log "=== $s ($P) ==="
+    PROV_BAD=0
+    if "run_$s" && [ "$PROV_BAD" = 0 ]; then record_result "$(rlabel "$s")" ok; else record_result "$(rlabel "$s")" fail; shot "$s-FAILED"; ui_state "$s-failed"; fi
+  done
 done
+out=$live_root
 log "results: ${results[*]}"
 printf '%s\n' "${results[@]}" > "$out/results.txt"
 cp "$MOCK_CONTROL_DIR/probes.log" "$out/probes.log" 2>/dev/null

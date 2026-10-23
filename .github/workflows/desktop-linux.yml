@@ -18,6 +18,11 @@ on:
       scenarios:
         description: "Mock only: ids, short prefixes (s03, dk02) or pack (desktop, see mockkit/packs.json). Default pack: desktop"
         default: ""
+      mock_provider:
+        description: "Mock provider flavor: grok (ACP mock, default) | codex (Codex app-server mock: OpenAI icon, GPT-6-Astra) | both. See mockkit/README.md"
+        type: choice
+        options: [grok, codex, both]
+        default: grok
 
 permissions:
   contents: read
@@ -102,6 +107,7 @@ jobs:
           BUILD_CACHE_HIT: ${{ steps.vp-cache.outputs.cache-hit }}
           MOCK: ${{ inputs.mock }}
           SCENARIOS: ${{ inputs.scenarios }}
+          MOCK_PROVIDER: ${{ inputs.mock_provider }}
         run: bash scripts/desktop-capture.sh
 
       - name: Save vp task cache + build outputs (per target sha)

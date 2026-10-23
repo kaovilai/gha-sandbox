@@ -313,6 +313,27 @@ Not covered (honest): background terminals (`thread/backgroundTerminals/*`, a co
 `dynamicToolCall` items, async questions (`agentMessage.delivery:"async"`), `subAgentActivity` items (newer subagent protocol; the mock uses `collabAgentToolCall`),
 `thread/closed`, `model/rerouted`, `thread/settings/updated`, `item/reasoning/textDelta` (raw reasoning), real `mcpServerStatus/list` data, `account/login/*` (T3 uses its own managed login, needs the real CLI download).
 Codex sends the goal's first turn before `thread/goal/set active`: a scenario that finishes faster than that round trip (no hold) races the status, so goal scenarios use `hold=`.
+## Codex everywhere (desktop + mobile) [track codex-everywhere]
+
+`desktop-linux.yml`, `android-app.yml`, `ios-app.yml` take `-f mock_provider=grok|codex|both` (default `grok` = unchanged), exported as `MOCK_PROVIDER`.
+
+* **Desktop** (`mock=true`): `targets/t3code-mock/desktop-scenario.mjs` -> `lib/resolve.mjs` (unit-tested). `codex`: every driver runs against the Codex mock, files named
+  `codex-<driver>-*.png|mp4|gif`. `both`: each driver twice (Grok, then Codex). `@codex` per token and codex-named packs (`codex`, `desktop-codex`) still win over the input.
+  Pack `desktop-codex` = pack `desktop` (s03, s08, s06, dk01-dk03) forced to Codex. `seed/settings.mjs` sees the per-scenario `MOCK_PROVIDER`; `bin/desktop-electron.mjs` just inherits it.
+  `lib/desktop.mjs` readiness accepts `app-server` in `probes.log` (the Codex launcher never receives `models`).
+* **Mobile live** (`live=true`): `scripts/mobile-live.sh` seeds the showcase server with `MOCK_PROVIDER`, then starts threads with `--provider codex --model gpt-6-astra`
+  (titles "Codex live stream" / "Codex approval" / "Codex question"). Codex pass output goes to `live/codex/` (published as `live__codex__s40-*.png`, results `codex-s40=ok`);
+  `both` runs the Grok pass, then the Codex pass on the same server and app. Every `server_truth` checks `thread.providerInstanceId` equals the pass provider (mismatch fails the scenario).
+  Codex approval card buttons are `Allow once`, `Allow session`, `Decline` (Grok: `Approve`, ...); the driver taps `^(Approve|Allow once)$`.
+  iOS shares the script and only passes the env through the job (`MOCK_PROVIDER`); iOS live CI verification is a separate track.
+* Verified: desktop Codex run 39997253161 (6/6; GPT-6-Astra picker, OpenAI icon in sidebar row, Settings > Providers "Codex ... Authenticated - OpenAI API Key", Grok shown Disabled).
+  Android live Codex run 40003071583 (S40/S41/S42, all `codex-s4x=ok`): thread rows and composer show the OpenAI glyph (the mobile composer shows the provider icon, not the model name; the
+  GPT-6-Astra name is only visible on desktop/web), server truth `provider=codex model=gpt-6-astra`, approval card `Allow once / Allow session / Decline`, "Approved: NOTES.md was written", answered question.
+  Mobile flakes handled in `mobile-live.sh`: uiautomator returns 0 nodes while the app animates (held stream, "Working" list row), and the thread view can stay blank/stale while the server
+  has the text (seen in `both` mode, run 40019463438: held + complete screenshots blank). S40 therefore never passes on server truth alone: if the UI tree lacks "Step 5 of 8" / "Live stream complete"
+  it remounts the thread (scene toggle + reopen) and requires the text there (`s40-streaming-held-remounted.png`, `s40-complete-remounted.png`). `open_thread` retries via scene toggle; BACK from the list
+  leaves the app, so it is never the fallback. In `both` mode gate/hold release files are cleared before each gated scenario (the Grok pass otherwise pre-releases the Codex pass's gates).
+  Note: S03 table content is scripted text and still lists "grok (mock)" as a table row; that is scenario content, not provider branding.
 
 ## Known limits
 

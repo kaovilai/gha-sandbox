@@ -27,6 +27,7 @@ const env = (extra = {}) =>
     MOCK_NODE: process.execPath,
     // Codex account/behaviour knobs (chatgpt plan, reset credits, legacy approvals): forwarded when set by the driver meta.env
     ...Object.fromEntries(["MOCK_CODEX_ACCOUNT", "MOCK_CODEX_PLAN", "MOCK_CODEX_RESET_CREDITS", "MOCK_CODEX_LEGACY_APPROVALS"].filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])),
+    ...(process.env.MOCK_HOLD_TIMEOUT_MS ? { MOCK_HOLD_TIMEOUT_MS: process.env.MOCK_HOLD_TIMEOUT_MS } : {}),
     ...extra,
   }).map(([name, value]) => ({ name, value }));
 

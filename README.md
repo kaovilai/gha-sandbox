@@ -17,7 +17,7 @@ orphan `evidence` branch (raw URLs serve `image/*`, so PNG/GIF embed inline in P
 | iOS app | `ios-app.yml` | Partial: simulator + native build + JS load work, one full success; pairing step is flaky (see below) |
 | Emulator capability probes | `emulators.yml` | Working: Android + iOS boot, screenshot, recording |
 | Re-publish any run's artifacts | `publish-run.yml` | Working |
-| Mock kit (keyless AI) | `mockkit/` | Working: Grok-flavored web 11+14, **Codex-flavored web pack 17** (`scenarios=codex`), **Claude-flavored web pack 20** (`scenarios=claude`), desktop 6, Android live 3; iOS live untested; Codex/Claude on desktop/mobile not run. See `mockkit/README.md` |
+| Mock kit (keyless AI) | `mockkit/` | Working: Grok-flavored web 11+14, **Codex-flavored web pack 17 + 10 extra** (`scenarios=codex`, `codex-extra`), **Claude-flavored web pack 20** (`scenarios=claude`), desktop 6, Android live 3; provider flavor (grok/codex/both) selectable on desktop/Android/iOS via `mock_provider`; iOS live: see mockkit/README.md. See `mockkit/README.md` |
 
 ## Using it for other projects (profiles)
 
