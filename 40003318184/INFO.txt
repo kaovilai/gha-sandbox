@@ -1,0 +1,1 @@
+target=pingdotgg/t3code base=main head=main scenario= scenarios=s11b@claude,s18@claude,s22@claude,s23@claude,s14@claude
