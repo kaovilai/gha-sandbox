@@ -114,6 +114,14 @@ export async function bootDesktop({
   try {
     const tailLog = () => `--- app log tail (${appLog}) ---\n${tail(appLog)}${exited ? `\n--- electron ${exited}` : ""}`;
     const cdpUrl = `http://127.0.0.1:${cdpPort}`;
+    let cdpState = "no response yet";
+    const head = () => {
+      try {
+        return readFileSync(appLog, "utf8").split("\n").slice(0, 12).join("\n");
+      } catch {
+        return "";
+      }
+    };
     // The renderer page is up once CDP lists a page target on the backend's http(s) origin.
     const pageUrl = await poll(
       "Electron CDP page target (http/https app origin)",
@@ -121,12 +129,18 @@ export async function bootDesktop({
         if (exited) throw new Error(`desktop boot: electron died early (${exited})\n${tailLog()}`);
         try {
           const list = await (await fetch(`${cdpUrl}/json/list`)).json();
+          cdpState = `targets: ${list.map((t) => `${t.type}:${t.url.slice(0, 80)}`).join(" | ")}`;
           return list.find((t) => t.type === "page" && /^https?:\/\//.test(t.url) && !/devtools/i.test(t.url))?.url ?? null;
-        } catch {
+        } catch (e) {
+          cdpState = `fetch failed: ${e.message}`;
           return null;
         }
       },
-      { timeout: 240_000, every: 1500, onFail: tailLog },
+      {
+        timeout: Number(process.env.DESKTOP_BOOT_TIMEOUT_MS || 120_000),
+        every: 1500,
+        onFail: () => `cdp ${cdpUrl}: ${cdpState}\n--- app log head ---\n${head()}\n${tailLog()}\n--- listeners ---\n${spawnSync("ss", ["-ltnp"], { encoding: "utf8" }).stdout}`,
+      },
     );
     console.log(`desktop ${id}: stateDir=${state} page=${pageUrl.replace(/[?#].*/, "")}`);
 

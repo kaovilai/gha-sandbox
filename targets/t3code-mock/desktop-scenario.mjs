@@ -90,7 +90,13 @@ function printMockFrames(mockLog, id) {
 }
 
 const results = [];
+let bootFailures = 0;
 for (const id of ids) {
+  if (bootFailures >= 2) {
+    console.log(`RESULT ${id} SKIP (2 consecutive boot failures; not burning CI minutes)`);
+    results.push([id, false]);
+    continue;
+  }
   const file = found.get(id);
   if (!file) {
     console.log(`RESULT ${id} FAIL (no driver; known: ${drivers.join(", ")}; packs: ${Object.keys(packs).join(", ")})`);
@@ -104,7 +110,13 @@ for (const id of ids) {
   let rec;
   let browser;
   try {
-    app = await bootDesktop({ id });
+    try {
+      app = await bootDesktop({ id });
+      bootFailures = 0;
+    } catch (e) {
+      bootFailures += 1;
+      throw e;
+    }
     const att = await attach(app, id);
     browser = att.browser;
     const page = att.page;

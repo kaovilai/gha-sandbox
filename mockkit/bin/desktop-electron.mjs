@@ -12,7 +12,7 @@ const flags = process.argv.slice(3);
 const desktopDir = join(target, "apps/desktop");
 execFileSync(process.execPath, [join(desktopDir, "scripts/build-browser-secret.mjs")], { stdio: "inherit" });
 const { resolveElectronLaunchCommand } = await import(pathToFileURL(join(desktopDir, "scripts/electron-launcher.mjs")).href);
-const cmd = resolveElectronLaunchCommand(["dist-electron/main.cjs", ...flags]);
+const cmd = resolveElectronLaunchCommand([...flags, "dist-electron/main.cjs"]) /* flags BEFORE the script, as dev-electron.mjs does */;
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 console.log(`desktop-electron: ${cmd.electronPath} ${cmd.args.join(" ")}`);
