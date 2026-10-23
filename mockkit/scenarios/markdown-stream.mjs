@@ -35,8 +35,17 @@ git status --short && echo "done"
 
 That is the end of the **markdown** stream.`;
 
+// Claude flavor (MOCK_CLI_FLAVOR=claude, set on the claude instance): the provider table names Claude models only, so no
+// other vendor shows up in Claude recordings.
+const CLAUDE_TABLE = `| Provider | Kind | Needs key |
+| -------- | ---- | --------- |
+| claude (mock) | stream-json | no |
+| claude-sonnet | API | yes |
+| claude-opus | API | yes |`;
+const mdFor = (flavor) => (flavor === "claude" ? MD.replace(/\| Provider[\s\S]*?\| claude \| SDK \| yes \|/, CLAUDE_TABLE) : MD);
+
 export default {
   id: "markdown-stream",
   title: "Markdown streaming demo",
-  steps: () => [S.say(MD, { chunk: 3, paceMs: 70 })],
+  steps: (ctx) => [S.say(mdFor(ctx.env?.MOCK_CLI_FLAVOR), { chunk: 3, paceMs: 70 })],
 };
