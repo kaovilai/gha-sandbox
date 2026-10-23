@@ -79,13 +79,13 @@ jobs:
           # Ubuntu 24 blocks the unprivileged user namespaces Chromium's sandbox needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      # Mock mode: minimal apt set (the full set pulls ~100 ffmpeg/glib dev libs and has stalled the apt mirror for 20+ min);
+      # Mock mode: smaller apt set (no apt ffmpeg: it pulls ~100 libs and has stalled the apt mirror for 20+ min);
       # ffmpeg comes from the static setup-ffmpeg build instead.
       - name: System deps, minimal (mock)
         if: inputs.mock
         timeout-minutes: 12
         run: |
-          bash scripts/apt-install.sh xvfb xdotool x11-utils imagemagick libgbm1 libnss3 libgtk-3-0t64 libasound2t64 libxss1 libxtst6 libatk-bridge2.0-0t64
+          bash scripts/apt-install.sh build-essential pkg-config libsecret-1-dev xvfb xdotool x11-utils imagemagick libgbm1 libnss3 libgtk-3-0t64 libasound2t64 libxss1 libxtst6 libatk-bridge2.0-0t64
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Setup ffmpeg (static build; mock recording)
         if: inputs.mock
