@@ -2,7 +2,7 @@
 # Runs the target's Electron dev app under Xvfb; captures real-desktop screenshot + recording.
 set -euxo pipefail
 out=${OUT_DIR:-out/desktop}
-mkdir -p "$out"
+mkdir -p "$out"; out=$(cd "$out" && pwd)
 export DISPLAY=:99
 W=1440 H=900
 
@@ -13,6 +13,22 @@ sleep 2
 for sb in $(find target/node_modules -name chrome-sandbox 2>/dev/null | head -3); do
   sudo chown root:root "$sb" && sudo chmod 4755 "$sb" || true
 done
+
+if [ "${MOCK:-false}" = true ]; then
+  # Mock-kit mode: build once, then drive the REAL Electron window (Playwright over CDP + xdotool), one isolated app per scenario.
+  ( cd target
+    if [ "${BUILD_CACHE_HIT:-}" = true ] && [ -f apps/desktop/dist-electron/main.cjs ]; then
+      echo "exact-sha build outputs restored from cache; skipping build" | tee "$out/build.log"
+    else
+      vp run build:desktop > "$out/build.log" 2>&1 || { tail -60 "$out/build.log"; exit 1; }
+    fi )
+  export MOCKKIT_TARGET="$PWD/target" OUT_DIR="$out" APP_LOG="$out/desktop.log" DESKTOP_W=$W DESKTOP_H=$H
+  export SCENARIOS="${SCENARIOS:-desktop}"
+  rc=0
+  node targets/t3code-mock/desktop-scenario.mjs || rc=$?
+  ls -la "$out"
+  exit $rc
+fi
 
 cd target
 if [ "${DESKTOP_MODE:-built}" = dev ]; then

@@ -11,6 +11,13 @@ on:
       ref:
         description: Ref (branch/sha, or pull/<N>/head)
         default: main
+      mock:
+        description: "Mock kit: seed mockkit mock provider + workspace, drive the real Electron window over CDP + xdotool, record scenarios"
+        type: boolean
+        default: false
+      scenarios:
+        description: "Mock only: ids, short prefixes (s03, dk02) or pack (desktop, see mockkit/packs.json). Default pack: desktop"
+        default: ""
 
 permissions:
   contents: read
@@ -71,9 +78,15 @@ jobs:
           # Ubuntu 24 blocks the unprivileged user namespaces Chromium's sandbox needs.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      - name: Harness deps (Playwright client only; attaches to Electron over CDP, no browser download)
+        if: inputs.mock
+        run: npm ci
+
       - name: Capture
         env:
           BUILD_CACHE_HIT: ${{ steps.vp-cache.outputs.cache-hit }}
+          MOCK: ${{ inputs.mock }}
+          SCENARIOS: ${{ inputs.scenarios }}
         run: bash scripts/desktop-capture.sh
 
       - name: Save vp task cache + build outputs (per target sha)

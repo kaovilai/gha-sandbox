@@ -12,6 +12,14 @@
     "s15-interrupt-cancel",
     "s17-multi-turn-context"
   ],
+  "desktop": [
+    "s03-markdown-stream",
+    "s08-approval-allow",
+    "s06-edit-file-diff",
+    "dk01-window-chrome",
+    "dk02-settings",
+    "dk03-command-palette"
+  ],
   "smoke": ["s03-markdown-stream", "s17-multi-turn-context"],
   "explore": ["s00-explore"],
   "all": "*"
