@@ -47,12 +47,13 @@ Scenario tips: mask nondeterministic text (runner hostname), dismiss banners, no
 ## t3code specifics
 
 - Web: pairs via `pairingUrl:` log line. Provider banner "Codex provider status" (no CLI on runner) → scenario dismisses.
-- Desktop mock: `gh workflow run desktop-linux.yml --repo kaovilai/gha-sandbox --ref <br> -f mock=true -f scenarios=desktop` (web drivers inside real Electron via CDP + xdotool, x11grab video; see mockkit/README.md Desktop). Packs/ids: s03,s06,s08,dk01-dk03.
+- Desktop mock: `gh workflow run desktop-linux.yml --repo kaovilai/gha-sandbox -f mock=true -f scenarios=desktop` (web drivers inside real Electron via CDP + xdotool, x11grab video; see mockkit/README.md Desktop). Packs/ids: s03,s06,s08,dk01-dk03.
 - Desktop: run built app (`build:desktop` + `start:desktop`); dev mode opens DevTools. Onboarding: Enter x5 then click (832,577) "Do not import projects".
 - Mobile: upstream `scripts/mobile-showcase.ts` (seeded, keyless). Our patches to throwaway checkout: scene timeouts, loopback Metro host, exact-bundle warm (`patch-showcase-warm.py`), caching manifest proxy `scripts/metro-manifest-proxy.mjs` (dev launcher 10 s timeout, HEAD probe).
 - Mobile live mock threads: `-f live=true` on `android-app.yml` (iOS best effort) → `scripts/mobile-live.sh` seeds mockkit into showcase server, starts threads via `bin.ts thread start`, taps app (uiautomator / AXe), S40 stream, S41 approve, S42 question. Evidence `live__*.png|gif|mp4`. Detail `mockkit/README.md` "Mobile".
 - iOS pairing intermittently fails ("No environments connected"); see README.
-- Keyless real-looking turns: mockkit (web, profile `t3code-mock`). `-f profile=t3code-mock -f sides=after -f scenarios=web|s07|s03,s17` (packs `mockkit/packs.json`; `scenario` path input still ok). One fresh T3 + workspace per scenario (no cross-scenario state). Drivers route hidden via `mockctl next <id>` queue, no `[mock:` in UI. Detail `mockkit/README.md`.
+- Keyless real-looking turns: mockkit (web, profile `t3code-mock`). `-f profile=t3code-mock -f sides=after -f scenarios=web|wide|smoke|s07|s03,s17` (packs `mockkit/packs.json`: web 11, wide 14, desktop 6; `scenario` path input still ok). One fresh T3 + workspace per scenario (no cross-scenario state). Drivers route hidden via `mockctl next <id>` queue, no `[mock:` in UI. Detail `mockkit/README.md`.
+- mockkit verified on main (2026-10-23): web 11 + wide 14 (RESULT ok), desktop mock 6, android live S40-S42. NOT verified: iOS live. Partial/weak: S01, S28, S34, S37, S07 mid-stream (T3 renders no live stdout). `RESULT ok` ≠ proof: view the PNG (README "Known evidence limits").
 
 ## Caching
 
