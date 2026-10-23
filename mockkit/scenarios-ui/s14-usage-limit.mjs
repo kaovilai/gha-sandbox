@@ -7,12 +7,13 @@ export default async function ({ page, shot, env }) {
   seedUpstreamGrok(env, "grok_usage", "Upstream (usage limit)", { T3_ACP_EMIT_XAI_RATE_LIMIT_THEN_HANG: "1" });
   await startSession(page, env);
   await page.waitForTimeout(8000); // hot reload + probes
-  await pickInstance(page, "Upstream (usage limit)", { shot });
+  await pickInstance(page, "Upstream (usage limit)", { shot, model: "Grok Build" });
   await composerEditor(page).click();
   await sendPrompt(page, "Please keep working on the migration.");
   await page.waitForTimeout(10_000);
   await shot("after-send");
   await dumpPage(page, "s14 after send");
+  if (await page.getByText(/Mock agent, turn/).first().isVisible().catch(() => false)) throw new Error("turn ran on the built-in mock, not the upstream agent");
   const banner = page.getByText(/Usage limit reached|usage limit|rate limit/i).first();
   const seen = await banner.isVisible().catch(() => false);
   console.log(`usage-limit UI visible: ${seen}`);

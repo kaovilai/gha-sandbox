@@ -63,7 +63,7 @@ export function seedUpstreamGrok(env, id, displayName, flags = {}) {
 }
 
 // Open the model picker (Ctrl+Shift+M), choose provider instance <displayName> and its first model.
-export async function pickInstance(page, displayName, { shot } = {}) {
+export async function pickInstance(page, displayName, { shot, model = "Mock Build" } = {}) {
   await page.keyboard.press("Control+Shift+M");
   await page.waitForTimeout(1200);
   const btn = page.getByRole("button", { name: displayName }).first();
@@ -71,7 +71,7 @@ export async function pickInstance(page, displayName, { shot } = {}) {
   await btn.click();
   await page.waitForTimeout(900);
   await shot?.("picker-instance");
-  await page.getByText("Mock Build", { exact: true }).last().click(); // popup is portaled last; first() would be the composer trigger label
+  await page.getByText(model, { exact: true }).last().click(); // popup is portaled last; first() would be the composer trigger label
   await page.waitForTimeout(800);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500);
