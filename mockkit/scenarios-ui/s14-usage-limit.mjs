@@ -4,8 +4,9 @@ import { ask, composerEditor, dumpPage, providerOf, sendPrompt, startSession } f
 import { pickInstance, seedUpstreamGrok } from "../lib/ui-extra.mjs";
 
 export default async function ({ page, shot, env }) {
-  if (providerOf(env) === "codex") {
+  if (providerOf(env) === "codex" || providerOf(env) === "claude") {
     // Codex flavor: the mock fails the turn with codexErrorInfo usageLimitExceeded + account/rateLimits/updated (scenario usage-limit).
+    // Claude flavor: rate_limit_event (rejected) + assistant error "rate_limit" + is_error result -> T3 usage_limit failure.
     await startSession(page, env);
     await shot("ready");
     await ask(page, env, "usage-limit", "Please keep working on the migration.");

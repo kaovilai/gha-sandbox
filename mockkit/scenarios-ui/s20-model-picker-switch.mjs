@@ -2,21 +2,22 @@
 import { composerEditor, dumpPage, providerOf, sendPrompt, startSession } from "../lib/ui.mjs";
 import { must, pickInstance, seedInstances } from "../lib/ui-extra.mjs";
 
-// Under the codex pack the server is seeded with BOTH mock providers (Codex + Grok).
-export const meta = { seed: { codex: "both" } };
+// Under the codex / claude packs the server is seeded with BOTH mock providers (Codex or Claude, plus Grok).
+export const meta = { seed: { codex: "both", claude: "claude+grok" } };
 
-// Codex flavor: thread starts on Codex (GPT-6-Astra); the picker lists Codex models and the Grok models; switch to Grok mid-thread.
+// Codex / Claude flavor: thread starts on that provider; the picker lists its models and the Grok models; switch to Grok mid-thread.
 async function codexFlow({ page, shot, env }) {
+  const prov = providerOf(env);
   await startSession(page, env);
   await page.waitForTimeout(4000);
   await sendPrompt(page, "Hello from the default model.");
   await page.getByText(/Mock agent, turn 1/).first().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1200);
-  await shot("codex-reply");
+  await shot(`${prov}-reply`);
   await page.keyboard.press("Control+Shift+M");
   await page.waitForTimeout(1200);
-  await shot("picker-open-codex");
-  await dumpPage(page, "s20 codex picker");
+  await shot(`picker-open-${prov}`);
+  await dumpPage(page, `s20 ${prov} picker`);
   await page.keyboard.press("Escape");
   await pickInstance(page, "Grok", { shot, model: "Mock Fast" });
   await composerEditor(page).click();
@@ -29,7 +30,7 @@ async function codexFlow({ page, shot, env }) {
 }
 
 export default async function (a) {
-  if (providerOf(a.env) === "codex") return codexFlow(a);
+  if (providerOf(a.env) === "codex" || providerOf(a.env) === "claude") return codexFlow(a);
   const { page, shot, env } = a;
   seedInstances(env, { grok_alt: { displayName: "Mock Alt", accentColor: "#d97706" } });
   await startSession(page, env);

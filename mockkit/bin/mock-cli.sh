@@ -1,5 +1,6 @@
 #!/bin/sh
-# Fake `grok` (and `codex`, see MOCK_CLI_FLAVOR below) CLI launcher. Mirrors packages/provider-testing fakeCli.
+# Fake `grok` (and `codex` / `claude`, see MOCK_CLI_FLAVOR below) CLI launcher. Mirrors packages/provider-testing fakeCli.
+#   claude flavor: claude --version | -p ... | auth status | --output-format stream-json ... -> bin/t3-mock-claude.mjs
 #   codex flavor: codex app-server | exec ... | mcp list --json | --version -> bin/t3-mock-codex.mjs
 #   grok --version                       -> grok 1.0.13
 #   grok models                          -> login line + model bullets (parsed by status.ts)
@@ -25,6 +26,7 @@ for a in "$@"; do
   case "$a" in
     --version)
       if [ "${MOCK_CLI_FLAVOR:-}" = codex ]; then exec "$NODE" "$HERE/t3-mock-codex.mjs" "$@"; fi
+      if [ "${MOCK_CLI_FLAVOR:-}" = claude ]; then exec "$NODE" "$HERE/t3-mock-claude.mjs" "$@"; fi
       if [ "$MODE" = old ]; then echo "grok 0.0.1"; else echo "grok 1.0.13"; fi
       exit 0 ;;
   esac
@@ -39,6 +41,16 @@ if [ -z "$FLAVOR" ]; then
   done
 fi
 if [ "$FLAVOR" = codex ]; then exec "$NODE" "$HERE/t3-mock-codex.mjs" "$@"; fi
+
+# Claude flavor (T3's claudeAgent driver: the Agent SDK spawns `<binaryPath> --output-format stream-json ...`, text generation runs
+# `<binaryPath> -p ...`): MOCK_CLI_FLAVOR=claude (seeded on claude instances) or those flags, which grok never receives.
+if [ -z "$FLAVOR" ]; then
+  [ "$1" = auth ] && FLAVOR=claude
+  for a in "$@"; do
+    case "$a" in --output-format|--input-format|--output-format=*|--input-format=*) FLAVOR=claude ;; esac
+  done
+fi
+if [ "$FLAVOR" = claude ]; then exec "$NODE" "$HERE/t3-mock-claude.mjs" "$@"; fi
 
 case "$1" in
   models)
