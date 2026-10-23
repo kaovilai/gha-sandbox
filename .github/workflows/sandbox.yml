@@ -62,8 +62,8 @@ jobs:
       SIDE: ${{ matrix.side }}
       PROFILE: ${{ inputs.profile }}
       OUT_DIR: ${{ github.workspace }}/out/${{ matrix.side }}
-      APP_LOG: ${{ runner.temp }}/app.log
-      APP_URL_FILE: ${{ runner.temp }}/app.url
+      APP_LOG: /tmp/app.log
+      APP_URL_FILE: /tmp/app.url
     steps:
       - uses: actions/checkout@v4
 
