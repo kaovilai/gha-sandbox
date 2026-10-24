@@ -360,6 +360,19 @@ cleared windows and one credit fewer (no `account/rateLimits/updated` push is ne
 profile, so the granted paths cannot be shown by any mock; the scenario's reason now names the path (`... needs write access to <ws>/dist`). (c) **s52** subagent rows are "Subagent":
 T3 never reads `agentNickname` / `agentRole` (only unit tests mention them); the title comes from the item (`collabAgentToolCall` has none, the `subAgentActivity` form uses `agentPath`, see s74).
 
+Verified in CI (run 40063237567: `codex` 17 + `codex-extra` 10 + `codex-extra2` 8 = 35/35 `RESULT ok`; first run 40045786074; PNGs read). What T3 really shows:
+
+* **s70** thread reads `Done` while the composer banner shows `Running: /bin/bash -lc "echo 'dev server listening ...'..."` + `Stop`; when the command exits T3 adds a `Command "..." finished` row and re-prompts the agent with `Background command completed (exit 0): /bin/bash -lc "..."` (the echoed continuation text names the command; the output tail is only appended when there is output).
+* **s71** same banner before; after `thread/closed` the banner is gone (T3 stops counting background work). The item is terminalized as interrupted (not separately visible in the collapsed work log).
+* **s72** a collapsed `Used 3 tools` group; expanded rows are titled from the tool (`Acme_docs.lookup`, REPL row shows the code with syntax highlighting) with the arguments and the `contentItems` JSON as output; the failed call has a red icon.
+* **s73** composer panel `Question 1/2` (PostgreSQL / SQLite, a dismiss X, `Next`); answering the last question sends ONE user message "<q1> <answer1> <q2> <answer2>" that starts a new turn; the timeline then shows a one-line `Which database ... PostgreSQL ...` row.
+* **s74** subagent rows are titled `Explorer` / `Builder` (last segment of `agentPath`, capitalized) with `Running` then the child's result, `2 subagents / 2 done`, Lineage panel; the child thread opens ("Subagent of ..."). The per-child `thread/settings/updated` (model/effort) and `model/rerouted` are consumed by T3 but NOT rendered anywhere visible (no model/effort on the row).
+* **s75** `Thought (x2)` group; expanded, the summary and the raw reasoning render as two paragraphs (no visual distinction between summary and raw).
+* **s76** the app's script gets the MCP Apps handshake and tool-result; `deploy_status` (annotation `readOnlyHint:true`) runs silently, a fresh `check #N` per click; `restart_service` (not read-only) makes T3 show a modal "Allow deploys to run Restart service?" + the JSON arguments with Cancel / Confirm (Cancel -> the app gets "Declined by the user."); `rotate_keys` (visibility `["model"]`) -> "This app cannot call that tool.". A tool call without `readOnlyHint` hangs behind that modal (found the hard way, first run).
+* **s77** composer banner `Feedback sent to OpenAI  Thread ID: <uuid>  Copy ID`, plus a local assistant message "Feedback sent to OpenAI. Thread ID: ..."; the report (reason + threadId) is in `feedback.jsonl`.
+* **s55** after `Use credit`: both bars read `100% left`, `No reset credits banked`, `Reset applied. Your windows have cleared.` (asserted).
+* **s51** the approval card text now reads `Write build output to dist/ (needs write access to /home/dev/demo-app/dist)`.
+
 Audit result for the rest (nothing to mock): T3 never sends `account/login/*` (login is its own managed flow), `logout` is Antigravity, and it never answers the server requests `item/tool/call`,
 `account/chatgptAuthTokens/refresh`, `attestation/generate`. `mcpServerStatus/list` feeds only MCP apps (T3 has no Settings MCP list for Codex; text generation uses `codex mcp list --json`, already answered).
 Item types T3 ignores (hookPrompt, imageView, sleep, review mode, image generation) are not produced.
