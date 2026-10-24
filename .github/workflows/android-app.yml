@@ -21,6 +21,11 @@ on:
         type: choice
         options: [grok, codex, claude, both, all]
         default: grok
+      live_ui:
+        description: "Live mode only. UI proof source: auto (idle-free accessibility dump, stock uiautomator, then OCR only if no tree) | ocr (force the OCR-only fallback end to end; slower, proves the fallback)"
+        type: choice
+        options: [auto, ocr]
+        default: auto
 
 permissions:
   contents: read
@@ -35,6 +40,8 @@ jobs:
       OUT_DIR: ${{ github.workspace }}/out/android-app
       LIVE: ${{ inputs.live && '1' || '0' }}
       MOCK_PROVIDER: ${{ inputs.mock_provider }}
+      LIVE_UI: ${{ inputs.live_ui || 'auto' }}
+      OCR_HOME: ${{ github.workspace }}/.t3-ocr
     steps:
       - name: Free disk (Android SDK + Gradle + emulator image are large)
         run: |
@@ -153,6 +160,13 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: echo "Generated AVD snapshot for caching."
+
+      - name: OCR fallback cache (tesseract.js + eng.traineddata; live proof ladder rung 3)
+        if: ${{ inputs.live }}
+        uses: actions/cache@v4
+        with:
+          path: .t3-ocr
+          key: ocr-tesseract6-eng-v1
 
       - name: Build + capture on emulator
         uses: reactivecircus/android-emulator-runner@v2

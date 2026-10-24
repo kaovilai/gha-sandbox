@@ -68,33 +68,126 @@ if [ "$plat" = ios ]; then
   export AXE_HID_STABILIZATION_MS=${AXE_HID_STABILIZATION_MS:-1500}
 fi
 
+# ---- Android UI tree ----------------------------------------------------------------------------------------------
+# Root cause of the old flake (proven locally + in CI, see mockkit/README.md "Mobile"): `uiautomator dump` calls
+# UiAutomation.waitForIdle(1000 ms idle, 10 s) and fails ("ERROR: could not get idle state.", nothing written) whenever
+# accessibility events keep arriving more often than once a second: a running thread's "Working Ns" timer, streaming text,
+# spinner. Animation scales 0 and --compressed do NOT help. scripts/android-dump/Dump.java connects UiAutomation the same
+# way but never waits for idle, so the tree of a running thread is readable. Ladder:
+#   1. idle-free Dump.java tree   (primary, ~0.4 s)
+#   2. stock `uiautomator dump`   (if Dump.java could not be built/run)
+#   3. OCR of a screenshot        (only when 1+2 return NO nodes; logs OCR-PROOF; coordinates from OCR boxes)
+# An empty tree is "no tree", never proof; a non-empty tree lacking the text is a real "not shown" (OCR is not consulted).
+# LIVE_UI=ocr forces rung 3 only (CI check that the fallback works end to end); LIVE_UI=stock disables rung 1.
+LIVE_UI=${LIVE_UI:-auto}
+OCR_HOME=${OCR_HOME:-$HOME/.cache/t3-ocr}
+DUMPER=0
+DUMP_CMD='CLASSPATH=/data/local/tmp/dump.jar:/system/framework/uiautomator.jar timeout 25 app_process /system/bin Dump'
+dumper_setup() {
+  [ "$plat" = android ] && [ "$LIVE_UI" != stock ] && [ "$LIVE_UI" != ocr ] || return 0
+  local sdk ajar d8 jc b=${RUNNER_TEMP:-/tmp}/android-dump
+  sdk=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
+  [ -n "$sdk" ] && [ -d "$sdk/platforms" ] || sdk=$(cd "$(dirname "$(command -v adb)")/.." 2>/dev/null && pwd)
+  ajar=$(ls -d "$sdk"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1)
+  d8=$(ls "$sdk"/build-tools/*/d8 2>/dev/null | sort -V | tail -1)
+  jc=$(command -v javac)
+  if [ -z "$ajar" ] || [ -z "$d8" ] || [ -z "$jc" ]; then
+    log "dumper: cannot build (android.jar='$ajar' d8='$d8' javac='$jc'); falling back to stock uiautomator + OCR"; return 1
+  fi
+  rm -rf "$b"; mkdir -p "$b/classes"
+  { "$jc" --release 8 -cp "$ajar" -d "$b/classes" "$here/android-dump/Dump.java" || "$jc" -source 8 -target 8 -cp "$ajar" -d "$b/classes" "$here/android-dump/Dump.java"; } >"$b/javac.log" 2>&1 \
+    && "$d8" --release --lib "$ajar" --output "$b/dump.jar" "$b"/classes/*.class >"$b/d8.log" 2>&1 \
+    || { log "dumper: build failed: $(tail -c 400 "$b/javac.log" "$b/d8.log" 2>/dev/null)"; return 1; }
+  adb shell 'rm -f /data/local/tmp/dump.jar' >/dev/null 2>&1
+  adb push "$b/dump.jar" /data/local/tmp/dump.jar >/dev/null 2>&1 && adb shell 'chmod 444 /data/local/tmp/dump.jar' || { log "dumper: push failed"; return 1; }
+  local x; x=$(adb shell "$DUMP_CMD" 2>"$out/ui/dumper.err")
+  case $x in
+    *"<node"*) DUMPER=1; log "dumper: idle-free UI dump ready ($(head -c 60 "$out/ui/dumper.err" | tr '\n' ' '))" ;;
+    *) log "dumper: self-test returned no tree: $(head -c 400 "$out/ui/dumper.err"); falling back to stock uiautomator + OCR"; return 1 ;;
+  esac
+}
+dumper_fails=0
 dump() {
   if [ "$plat" = android ]; then
-    # uiautomator cannot reach "idle" while the app animates/streams and then leaves the PREVIOUS dump on disk:
-    # delete first, retry, and fail (empty) rather than return a stale tree.
+    [ "$LIVE_UI" = ocr ] && return 1
     local i x
-    for i in 1 2 3; do
-      adb shell "rm -f /sdcard/uia.xml; uiautomator dump /sdcard/uia.xml" >/dev/null 2>&1
-      x=$(adb exec-out cat /sdcard/uia.xml 2>/dev/null)
-      [ -n "$x" ] && { printf '%s\n' "$x"; return 0; }
-      sleep 1
-    done
+    if [ "$DUMPER" = 1 ]; then
+      for i in 1 2; do
+        x=$(adb shell "$DUMP_CMD" 2>"$out/ui/dumper.err")
+        case $x in *"<node"*) echo fast > "$out/ui/last.src"; printf '%s\n' "$x"; return 0 ;; esac
+        dumper_fails=$((dumper_fails + 1))
+        (( dumper_fails <= 3 )) && log "dumper returned no tree ($dumper_fails): $(head -c 300 "$out/ui/dumper.err")"
+        sleep 1
+      done
+    fi
+    # stock uiautomator leaves the PREVIOUS dump on disk when it cannot reach idle: delete first, never return a stale tree.
+    adb shell "rm -f /sdcard/uia.xml; uiautomator dump /sdcard/uia.xml" >/dev/null 2>&1
+    x=$(adb exec-out cat /sdcard/uia.xml 2>/dev/null)
+    [ -n "$x" ] && { echo stock > "$out/ui/last.src"; printf '%s\n' "$x"; return 0; }
     return 1
   else
     axe describe-ui --udid "$UDID" 2>/dev/null
   fi
 }
 ui_find() { dump | tee "$out/ui/last.dump" | node "$uia" find "$1"; }
+ui_count() { node "$uia" count < "$out/ui/last.dump" 2>/dev/null || echo 0; }
+
+# OCR rung (Android only). tesseract.js is installed lazily into $OCR_HOME (CI caches it) and eng.traineddata cached next to it.
+OCR_OK=
+ocr_ready() {
+  [ "$plat" = android ] || return 1
+  [ -n "$OCR_OK" ] && return "$OCR_OK"
+  mkdir -p "$OCR_HOME"
+  if [ ! -d "$OCR_HOME/node_modules/tesseract.js" ]; then
+    [ -e "$OCR_HOME/package.json" ] || echo '{"private":true}' > "$OCR_HOME/package.json"
+    log "ocr: installing tesseract.js into $OCR_HOME"
+    ( cd "$OCR_HOME" && npm i tesseract.js@6 --no-audit --no-fund ) > "$out/ui/ocr-install.log" 2>&1 || { log "ocr: install failed: $(tail -c 300 "$out/ui/ocr-install.log")"; OCR_OK=1; return 1; }
+  fi
+  OCR_OK=0
+}
+# ocr_run <name>: screenshot -> $out/ui/ocr-<name>.{png,json}; 0 on success
+ocr_run() {
+  ocr_ready || return 1
+  adb exec-out screencap -p > "$out/ui/ocr-$1.png" 2>/dev/null
+  OCR_HOME=$OCR_HOME node "$here/ocr.mjs" "$out/ui/ocr-$1.png" > "$out/ui/ocr-$1.json" 2>"$out/ui/ocr.err" || { log "ocr: run failed: $(tail -c 300 "$out/ui/ocr.err")"; return 1; }
+}
+# ocr_find <regex> <name> -> "cx cy label" (+ OCR-PROOF log, screenshot kept as ui/ocr-<name>.png); 1 if the text is not on screen
+ocr_find() {
+  local r
+  ocr_run "$2" || return 1
+  if r=$(node "$uia" find "$1" < "$out/ui/ocr-$2.json"); then
+    log "OCR-PROOF /$1/ ($2) -> $r  [evidence: ui/ocr-$2.png, ui/ocr-$2.json]"
+    echo "$r"
+    return 0
+  fi
+  log "OCR does not see /$1/ ($2); OCR text:"
+  node "$uia" texts < "$out/ui/ocr-$2.json" 2>&1 | head -30 >&2
+  return 1
+}
+
 # wait_ui <regex> <timeoutSec> <name>  -> prints "cx cy label" of first match
 wait_ui() {
-  local re=$1 to=${2:-90} name=${3:-x} t0=$SECONDS r
+  local re=$1 to=${2:-90} name=${3:-x} t0=$SECONDS r empties=0
+  if [ "$LIVE_UI" != ocr ]; then
+    while (( SECONDS - t0 < to )); do
+      if r=$(ui_find "$re"); then echo "$r"; return 0; fi
+      # no usable tree several times in a row (~8 s): stop polling a dead tree, go straight to OCR
+      if [ "$(ui_count)" -eq 0 ]; then empties=$((empties + 1)); (( empties >= 4 )) && break; else empties=0; fi
+      sleep 1
+    done
+    cp "$out/ui/last.dump" "$out/ui/timeout-$name.dump" 2>/dev/null
+    log "timeout waiting for /$re/ ($name); labelled nodes now ($(cat "$out/ui/last.src" 2>/dev/null)):"
+    node "$uia" texts < "$out/ui/last.dump" 2>&1 | head -50 >&2
+    # a tree WITH nodes that lacks the text really means "not shown"; only a missing tree falls back to OCR
+    [ "$plat" = android ] && [ "$(ui_count)" -eq 0 ] || return 1
+    log "NO-UI-TREE for /$re/ ($name): uiautomator returned no labelled nodes; trying OCR of a screenshot"
+    ocr_find "$re" "$name"
+    return
+  fi
   while (( SECONDS - t0 < to )); do
-    if r=$(ui_find "$re"); then echo "$r"; return 0; fi
-    sleep 2
+    if r=$(ocr_find "$re" "$name"); then echo "$r"; return 0; fi
+    sleep 1
   done
-  cp "$out/ui/last.dump" "$out/ui/timeout-$name.dump" 2>/dev/null
-  log "timeout waiting for /$re/ ($name); labelled nodes now:"
-  node "$uia" texts < "$out/ui/last.dump" 2>&1 | head -50 >&2
   return 1
 }
 tap() {
@@ -116,8 +209,23 @@ shot() {
 ui_state() {
   dump > "$out/ui/$1.dump"
   node "$uia" texts < "$out/ui/$1.dump" > "$out/ui/$1.txt"
-  log "ui state $1: $(wc -l < "$out/ui/$1.txt") labelled nodes"
+  if [ "$plat" = android ] && [ ! -s "$out/ui/$1.txt" ] && ocr_run "state-$1"; then
+    { echo "# source: OCR of a screenshot (no UI tree available)"; node "$uia" texts < "$out/ui/ocr-state-$1.json"; } > "$out/ui/$1.txt"
+    log "OCR-PROOF ui state $1 (no UI tree) [evidence: ui/ocr-state-$1.png]"
+  fi
+  log "ui state $1 ($(cat "$out/ui/last.src" 2>/dev/null)): $(wc -l < "$out/ui/$1.txt") labelled nodes"
   head -40 "$out/ui/$1.txt" >&2
+}
+# diag_compare <tag>: stock uiautomator vs the idle-free dump on the CURRENT (possibly animating) screen. Pure evidence for the root
+# cause: prints "stock: could not get idle state / idle-free: N labelled nodes". Android only, never affects results.
+diag_compare() {
+  [ "$plat" = android ] && [ "$DUMPER" = 1 ] || return 0
+  local s n x
+  s=$(adb shell "rm -f /sdcard/diag.xml; uiautomator dump /sdcard/diag.xml 2>&1; ls -la /sdcard/diag.xml 2>&1" | tr -d '\r' | tr '\n' ' ')
+  x=$(adb shell "$DUMP_CMD" 2>/dev/null)
+  n=$(printf '%s' "$x" | node "$uia" count)
+  log "DIAG[$1] stock uiautomator dump -> $s| idle-free dump -> $n labelled nodes"
+  echo "DIAG[$1] stock=$s idle_free_labelled_nodes=$n" >> "$live_root/ui-diag.txt"
 }
 recpid=
 rec_start() {
@@ -205,19 +313,19 @@ open_thread() { # <title>
   else
     back
   fi
-  if ! wait_ui "$title" 25 "list-$navs" >/dev/null; then
+  if ! wait_ui "$title" 20 "list-$navs" >/dev/null; then
     log "list not showing '$title'; toggling scene thread -> threads"
     write_scene thread; sleep 8; write_scene threads
-    wait_ui "$title" 60 "list-toggle-$navs" >/dev/null || return 1
+    wait_ui "$title" 40 "list-toggle-$navs" >/dev/null || return 1
   fi
   sleep 1
   # a running thread's list row animates ("Working Ns"): uiautomator then often returns an empty tree. If the tap target cannot be
   # found, re-toggle the scene (thread -> threads; never BACK, which from the list leaves the app) and retry once.
-  tap_re "$title" 30 "open-$navs" && return 0
+  tap_re "$title" 20 "open-$navs" && return 0
   log "tap on '$title' failed; toggling scene thread -> threads and retrying"
   write_scene thread; sleep 8; write_scene threads
   sleep 2
-  tap_re "$title" 60 "open-retry-$navs"
+  tap_re "$title" 40 "open-retry-$navs"
 }
 
 # The thread screen disables Stop/Approve/Submit ("This connection cannot respond to approvals / submit answers /
@@ -241,7 +349,7 @@ ensure_operable() { # <title>
 remount_until() { # <title> <regex> <tag>
   local i
   for i in 1 2 3; do
-    open_thread "$1" && wait_ui "$2" $((30 + 20 * i)) "$3-r$i" >/dev/null && return 0
+    open_thread "$1" && wait_ui "$2" $((25 + 10 * i)) "$3-r$i" >/dev/null && return 0
     log "remount $i/3 did not show /$2/"
   done
   return 1
@@ -298,19 +406,13 @@ run_s40() {
   # A missing UI tree is NOT proof of anything: in CI run 40016905754/40019463438 (mock_provider=both) the held AND complete screenshots were
   # blank (no assistant text) while server truth was fine, i.e. the app view was stale. So when the tree lacks the text, remount the thread
   # (scene toggle, reopen) and require the text there; only then is the state proven in the UI. Never "ok" on server truth alone.
+  diag_compare s40-held
+  # wait_ui falls back to OCR (logged OCR-PROOF) only when no UI tree at all can be had; an empty tree is never proof by itself.
   if ! wait_ui "Step 5 of 8" 30 s40-held-ui >/dev/null; then
-    log "UI lacks 'Step 5 of 8' while held (stale/blank thread view or uiautomator flake); remounting thread"
-    # Claude's running thread shows an animated "Thinking" row + "Working Ns" pill: uiautomator then NEVER reaches idle and returns an EMPTY
-    # tree (0 labelled nodes; run 40049775691), even though the screenshot shows Steps 1-5. An empty tree is "no tree", not "no text": for the
-    # Claude pass accept the held screenshot (read it) + server truth for the HELD state only; the completed state below still needs the UI tree.
-    if [ "$PROV" = claudeAgent ] && [ "$(node "$uia" texts < "$out/ui/last.dump" 2>/dev/null | wc -l)" -eq 0 ]; then
-      log "HELD-UI-TREE-UNAVAILABLE: uiautomator returns no nodes while the Claude turn animates; s40-streaming-held.png + server truth are the held proof"
-      echo "held-state UI tree unavailable (animated Thinking row); proof = s40-streaming-held.png + server-truth.ndjson" > "$out/s40-held-ui-note.txt"
-    else
-      remount_until "$title" "Step 5 of 8" s40-held-ui || { shot s40-held-NO-UI-PROOF; rec_stop s40; return 1; }
-      sleep 1
-      shot s40-streaming-held-remounted
-    fi
+    log "UI lacks 'Step 5 of 8' while held (stale/blank thread view); remounting thread"
+    remount_until "$title" "Step 5 of 8" s40-held-ui || { shot s40-held-NO-UI-PROOF; rec_stop s40; return 1; }
+    sleep 1
+    shot s40-streaming-held-remounted
   fi
   # mid-turn means: UI has step 5 but not step 6, and the server still has the run open
   node "$uia" find "Step 6 of 8" < "$out/ui/last.dump" >/dev/null && log "UNEXPECTED: step 6 visible while held"
@@ -352,6 +454,7 @@ run_s41() {
     wait_ui "Approval needed|Allow once" 45 s41-card2 >/dev/null || { shot s41-card-missing2; server_truth s41-card-missing2 "$tid"; rec_stop s41; return 1; }
   fi
   sleep 2
+  diag_compare s41-pending
   shot s41-approval-pending
   ui_state s41-pending
   server_truth s41-pending "$tid"
@@ -403,6 +506,16 @@ run_s42() {
   echo "$SRV_TEXT" | grep -q "going with"
 }
 
+dumper_setup
+# the OCR fallback is the safety net of the proof ladder: exercise it every Android run (non-fatal) so a broken fallback is noticed
+# before it is needed. LIVE_UI=ocr (workflow input live_ui) additionally drives the whole scenario through OCR only.
+if [ "$plat" = android ] && [ "${LIVE_OCR_SELFTEST:-1}" = 1 ]; then
+  if ocr_run selftest; then
+    log "OCR-SELFTEST ok: $(node "$uia" count < "$out/ui/ocr-selftest.json") text segments on the home/app screen"
+  else
+    log "OCR-SELFTEST failed (OCR fallback unavailable this run)"
+  fi
+fi
 shot 00-before
 for P in $providers; do
   use_provider "$P"
