@@ -415,7 +415,7 @@ CI: `sandbox.yml` with `scenarios=web`, `wide` and `codex` on branch `track-tigh
 * **S37.** Tree rows (`@pierre/trees`, shadow DOM) are `button[role=treeitem][data-item-path]`; the text locator used before matched the off-screen "parked"
   duplicate. Locate `[data-type="item"][role="treeitem"]:not([data-item-parked])`, plain click works (ladder kept: click, force, dispatch, Enter). Markdown: header toggle
   `Show rendered markdown` -> real `<h1>`/list/table. Image: `<img alt="assets/logo.svg">` with decoded pixels.
-- Runner hostname still visible in the project panel in web/desktop shots (mask in scenarios when it matters).
+- (superseded by "Tighten round 2": the hostname is masked everywhere the DOM text/shadow DOM/canvas/inputs show it.) Residual: attribute-only strings (e.g. the `aria-label`/tooltip `Environment scope: <hostname>`) are not rewritten, so a hover tooltip on that button would show the real hostname; no shot hovers it.
 - iOS live (`ios-app.yml -f live=true`): verified green in CI (S40/S41/S42, see "iOS live pairing"). Runner CPU contention makes every step slow (CLI `thread show` ~10 s, session fetch can time out), so state is proven by PNGs + server truth; timings in the shots ("Working 1m 02s") are not meaningful.
 
 ## Tighten round 2 (track tighten-2)
