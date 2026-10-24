@@ -272,7 +272,10 @@ test("mcp-app-interactive: mcpServerStatus/list returns the registered tools (+ 
   assert.equal(srv.name, "deploys");
   assert.equal(srv.authStatus, "unsupported");
   assert.deepEqual(srv.resources, []);
-  assert.deepEqual(Object.keys(srv.tools).sort(), ["deploy_status", "rotate_keys"]);
+  assert.deepEqual(Object.keys(srv.tools).sort(), ["deploy_status", "restart_service", "rotate_keys"]);
+  assert.equal(srv.tools.deploy_status.annotations.readOnlyHint, true, "read-only tools run without a confirm dialog");
+  assert.equal(srv.tools.deploy_status.annotations.title, "Deploy status");
+  assert.equal(srv.tools.restart_service.annotations.readOnlyHint, undefined, "state-changing tool: T3 asks first");
   assert.deepEqual(srv.tools.deploy_status._meta.ui.visibility, ["model", "app"]);
   assert.deepEqual(srv.tools.rotate_keys._meta.ui.visibility, ["model"]);
   assert.equal(srv.tools.deploy_status.inputSchema.type, "object");

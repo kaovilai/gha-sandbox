@@ -3,16 +3,17 @@ import { S } from "../lib/ir.mjs";
 // Interactive MCP app (Codex): the HTML app has a script that talks to T3 over the MCP Apps bridge (postMessage JSON-RPC: ui/initialize,
 // tools/call). T3 first asks the provider for the server's tools (mcpServerStatus/list, which carries `_meta.ui.visibility`) and only then
 // forwards an allowed call as mcpServer/tool/call. `deploy_status` is app-callable and answers with a fresh counter on each click;
-// `rotate_keys` is hidden from apps (visibility ["model"]) so T3 refuses the call ("tool-not-callable").
+// `restart_service` is not read-only, so T3 asks the user (confirm dialog) before forwarding it; `rotate_keys` is hidden from apps (visibility ["model"]) so T3 refuses the call ("tool-not-callable").
 const html = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
   body { font: 14px system-ui, sans-serif; margin: 0; padding: 14px; background: #f6f8fb; color: #1d2733; }
   h1 { font-size: 15px; margin: 0 0 10px; }
   button { font: inherit; padding: 5px 12px; margin-right: 8px; border: 1px solid #9fb3c8; border-radius: 6px; background: #fff; cursor: pointer; }
-  #status, #hidden { margin: 10px 0 0; padding: 8px 10px; background: #fff; border: 1px solid #d9e0ea; border-radius: 8px; }
+  #status, #hidden, #restartout { margin: 10px 0 0; padding: 8px 10px; background: #fff; border: 1px solid #d9e0ea; border-radius: 8px; }
 </style></head><body>
   <h1>Deploy board (mock MCP app, interactive)</h1>
-  <div><button id="refresh">Refresh status</button><button id="rotate">Rotate keys</button></div>
+  <div><button id="refresh">Refresh status</button><button id="restart">Restart service</button><button id="rotate">Rotate keys</button></div>
+  <div id="restartout">Restart: not tried yet</div>
   <div id="status">Initializing...</div>
   <div id="hidden">Hidden tool: not tried yet</div>
 <script>
@@ -52,6 +53,13 @@ const html = `<!doctype html>
       function (e) { document.getElementById("status").textContent = "tools/call failed: " + e.message; }
     );
   });
+  document.getElementById("restart").addEventListener("click", function () {
+    document.getElementById("restartout").textContent = "Calling restart_service...";
+    request("tools/call", { name: "restart_service", arguments: { service: "api" } }).then(
+      function (r) { document.getElementById("restartout").textContent = "restart_service ok: " + textOf(r); },
+      function (e) { document.getElementById("restartout").textContent = "restart_service refused: " + e.message; }
+    );
+  });
   document.getElementById("rotate").addEventListener("click", function () {
     document.getElementById("hidden").textContent = "Calling rotate_keys...";
     request("tools/call", { name: "rotate_keys", arguments: {} }).then(
@@ -87,7 +95,17 @@ export default {
           description: "Current deploy status of an environment",
           inputSchema: { type: "object", properties: { env: { type: "string" } } },
           visibility: ["model", "app"],
+          annotations: { title: "Deploy status", readOnlyHint: true }, // read-only: T3 runs it without asking
           result: (args) => `staging v2.14.${++calls} live, 3 pods healthy (env=${args.env ?? "staging"}, check #${calls})`,
+        },
+        {
+          name: "restart_service",
+          title: "Restart service",
+          description: "Restart a service (changes state)",
+          inputSchema: { type: "object", properties: { service: { type: "string" } } },
+          visibility: ["model", "app"],
+          annotations: { title: "Restart service" }, // NOT read-only: T3 asks the user before forwarding the call
+          result: (args) => `service ${args.service ?? "api"} restarted`,
         },
         { name: "rotate_keys", description: "Rotate signing keys (model only)", visibility: ["model"], result: "rotated" },
       ],

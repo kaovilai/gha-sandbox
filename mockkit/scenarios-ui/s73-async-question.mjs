@@ -29,12 +29,7 @@ export default async function ({ page, shot, env }) {
       await page.waitForTimeout(900);
     }
   }
-  await shot("both-answered");
-  const submit = page.getByRole("button", { name: /Submit|Send|Next|Continue|Answer/i }).last();
-  if (await submit.isVisible().catch(() => false)) {
-    console.log(`FINDING submit control: ${JSON.stringify((await submit.textContent())?.trim())}`);
-    await submit.click();
-  }
+  // answering the LAST question submits (T3 shows one question at a time, "Question 1/2"); no extra submit control exists
   await expectText(page, /I recorded your answer and will plan the migration/, "agent reply after the async answer (a new turn)", 90_000);
   const m = await expectBody(page, /You said: ([^\n]*)/, "agent echoes the answer message T3 sent", 20_000);
   console.log(`FINDING answer message text T3 sent: ${JSON.stringify(m[1])}`);

@@ -10,7 +10,13 @@ export default async function ({ page, shot, env }) {
   await shot("answer");
   await expandWork(page);
   await expandRows(page, { type: "reasoning" });
-  await expandRows(page, { hasText: /Thinking|Reasoning/i });
+  // the collapsed group row reads "Thought (x2)": one summary + one raw block
+  const grp = page.getByText(/^Thought/).first();
+  if (await grp.isVisible().catch(() => false)) {
+    await grp.click().catch(() => {});
+    await page.waitForTimeout(800);
+  }
+  await expandRows(page, {});
   await page.waitForTimeout(1200);
   await dumpPage(page, "s75 reasoning expanded");
   const t = await bodyText(page);

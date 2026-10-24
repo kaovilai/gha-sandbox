@@ -2,7 +2,7 @@
 // T3 asks the provider for the server's tools (mcpServerStatus/list, real data incl. `_meta.ui.visibility`), then forwards the allowed
 // call as mcpServer/tool/call and returns the result to the iframe (a fresh counter per click proves it is computed live, not canned).
 // "Rotate keys" calls a tool hidden from apps (visibility ["model"]): T3 must refuse it. Codex flavor only (S58 = the static app).
-import { ask, dumpPage, expectText, startSession } from "../lib/ui.mjs";
+import { ask, dumpPage, expectText, expectVisible, startSession } from "../lib/ui.mjs";
 
 async function appFrame(page, timeout = 60_000) {
   const t0 = Date.now();
@@ -48,6 +48,21 @@ export default async function ({ page, shot, env }) {
   await frame.locator("#refresh").click();
   await waitFrameText(page, frame, "#status", /check #2\)/, "second call returns a fresh counter (computed per call)");
   await shot("tool-call-2");
+  // a tool that is not read-only: T3 asks the user before forwarding the call (confirm dialog); decline first, then allow
+  await frame.locator("#restart").click();
+  await expectText(page, /Allow deploys to run Restart service\?/, "T3 confirm dialog for the non-read-only tool", 20_000);
+  await page.waitForTimeout(600);
+  await shot("confirm-dialog");
+  const dlg = await dumpPage(page, "s76 confirm dialog");
+  console.log(`FINDING confirm dialog buttons: ${JSON.stringify(dlg.buttons.filter((b) => /Cancel|Decline|Deny|No\b|Allow|Confirm|Approve|Yes|OK/i.test(b)).slice(0, 8))}`);
+  await page.getByRole("button", { name: /^(Cancel|Decline|Deny|No)$/i }).last().click();
+  await waitFrameText(page, frame, "#restartout", /restart_service refused: Declined by the user/, "declining the dialog refuses the call");
+  await frame.locator("#restart").click();
+  const allow = page.getByRole("button", { name: /^(Allow|Confirm|Approve|Yes|OK|Continue)$/i }).last();
+  await expectVisible(page, allow, "allow button in the confirm dialog", 20_000);
+  await allow.click();
+  await waitFrameText(page, frame, "#restartout", /restart_service ok: service api restarted/, "allowing the dialog forwards mcpServer/tool/call");
+  await shot("restart-allowed");
   await frame.locator("#rotate").click();
   const hidden = await waitFrameText(page, frame, "#hidden", /rotate_keys refused/, "T3 refuses a tool whose visibility excludes apps");
   console.log(`FINDING hidden tool: ${JSON.stringify(hidden)}`);

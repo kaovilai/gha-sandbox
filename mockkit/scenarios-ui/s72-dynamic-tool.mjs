@@ -10,7 +10,13 @@ export default async function ({ page, shot, env }) {
   await shot("done-collapsed");
   await expandWork(page);
   await page.waitForTimeout(600);
-  await expandRows(page, { type: "dynamic" });
+  // the three dynamic calls are grouped as "Used 3 tools" (collapsed): open the group, then every row inside it
+  const grp = page.getByText(/^Used \d+ tools?/).first();
+  if (await grp.isVisible().catch(() => false)) {
+    await grp.click().catch(() => {});
+    await page.waitForTimeout(800);
+  }
+  await expandRows(page, {});
   await expandRows(page, {});
   await page.waitForTimeout(1200);
   const info = await dumpPage(page, "s72 dynamic tools expanded");

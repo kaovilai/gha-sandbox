@@ -334,10 +334,36 @@ Run: `-f scenarios=codex-extra` (or `codex,codex-extra`; CI runs 40002719710 + 4
 * **s55** Providers card "Authenticated as <blurred email> · ChatGPT Pro 20x Subscription"; `/usage-limits` banner with Session 77% / Weekly 59% left, "1 reset credit banked", "Use reset" (confirm dialog "Use a reset credit?", then `consume` answers `reset`; T3 shows "Reset applied. Your windows have cleared." but the Session/Weekly bars and the credit count did not refresh within 4.5 s, the mock's next `rateLimits/read` reports 0% used).
 * **s56** commentary line before the answer, work log "Searched the web 2 times". **s57** "Retrying provider (2/5)" row while held, cleared when output resumes. **s58** the HTML app renders inline in the timeline (sandboxed iframe).
 
-Not covered (honest): background terminals (`thread/backgroundTerminals/*`, a command item that outlives its turn, T3 then re-prompts the agent on completion),
-`dynamicToolCall` items, async questions (`agentMessage.delivery:"async"`), `subAgentActivity` items (newer subagent protocol; the mock uses `collabAgentToolCall`),
-`thread/closed`, `model/rerouted`, `thread/settings/updated`, `item/reasoning/textDelta` (raw reasoning), real `mcpServerStatus/list` data, `account/login/*` (T3 uses its own managed login, needs the real CLI download).
+Not covered in this round (closed by track codex-gaps-2, see below): background terminals, `dynamicToolCall`, async questions, `subAgentActivity`, `thread/closed`, `model/rerouted`, `thread/settings/updated`, raw reasoning, `mcpServerStatus/list` data.
 Codex sends the goal's first turn before `thread/goal/set active`: a scenario that finishes faster than that round trip (no hold) races the status, so goal scenarios use `hold=`.
+
+## Codex gaps 2 (track codex-gaps-2)
+
+Second audit of T3's Codex adapter (`CodexAdapterV2.ts` + `packages/effect-codex-app-server`, t3code main 2026-10-24): every client request T3 sends and
+every server notification/request it consumes, against `adapters/codex.mjs`. Pack `codex-extra2` (drivers s70-s77); unit tests `test/codex-gaps2.test.mjs`.
+New provider-neutral IR (`lib/ir.mjs`, other adapters degrade): `dynTool`, `asyncAsk`, `think {raw}`, `bgTask {close}` on Codex, `subagent {path, settings, reroute, reasoningEffort}`, `mcpApp {tools}`.
+
+| T3 handles | mock | IR / scenario | driver |
+| --- | --- | --- | --- |
+| background terminal: `commandExecution` still `inProgress` after `turn/completed`, late `outputDelta`, completion on the ORIGINAL turn id, continuation message (T3 re-prompts the agent); `thread/backgroundTerminals/list\|terminate` | item outlives the turn; list shows live processes; terminate kills the process group and fails the item (exit 143) | `bgTask` / `bg-terminal` (+`bg-wake` = reply to the continuation); `until=<gate>` holds the completion | s70 |
+| `thread/closed` (idle thread unloaded: terminals die without completing their item) | kills the process, emits `thread/closed`, no `item/completed` | `bgTask {close:true}` / `bg-terminal close=1` | s71 |
+| `dynamicToolCall` item (`node_repl.js` titled from `arguments.title`, namespaced tools, `success:false`) | started/completed with `contentItems` | `dynTool` / `dynamic-tool` | s72 |
+| async question: `agentMessage {delivery:"async", questions}` (turn ends, answer = a normal user message) | no blocking request | `asyncAsk` / `async-ask` (`phase=answer`) | s73 |
+| `subAgentActivity` (started / completed; `agentPath` = row title), `thread/settings/updated` + `model/rerouted` (consumed for subagents only) | child thread + own turn, settings/reroute pushed for the child | `subagent {path, settings, reroute}` / `subagent-activity` | s74 |
+| `item/reasoning/textDelta` (raw reasoning -> reasoning `content`) | separate reasoning item with `content` | `think {raw:true}` / `raw-reasoning` | s75 |
+| `mcpServerStatus/list` (tools + `_meta.ui.visibility`) and `mcpServer/tool/call` behind an MCP app's own `tools/call` | tools registered by the scenario, results computed per call | `mcpApp {tools}` / `mcp-app-interactive` | s76 |
+| `feedback/upload` (`/feedback [reason]` composer command, Codex only) | answers a thread id, records the report in `$MOCK_CONTROL_DIR/feedback.jsonl` | none (protocol) | s77 |
+
+Fidelity fixes: (a) **s55** reset credit: T3 redeems on a SEPARATE short-lived app-server and re-probes `account/rateLimits/read` on yet another process, so the mock's in-memory
+"used" flag never reached the refreshed snapshot (bars and credit count looked unchanged); account state now lives in `$MOCK_CONTROL_DIR/codex-account.json`, so the re-probe reports
+cleared windows and one credit fewer (no `account/rateLimits/updated` push is needed). (b) **s51** T3 renders only `reason` of `item/permissions/requestApproval` and never the `permissions`
+profile, so the granted paths cannot be shown by any mock; the scenario's reason now names the path (`... needs write access to <ws>/dist`). (c) **s52** subagent rows are "Subagent":
+T3 never reads `agentNickname` / `agentRole` (only unit tests mention them); the title comes from the item (`collabAgentToolCall` has none, the `subAgentActivity` form uses `agentPath`, see s74).
+
+Audit result for the rest (nothing to mock): T3 never sends `account/login/*` (login is its own managed flow), `logout` is Antigravity, and it never answers the server requests `item/tool/call`,
+`account/chatgptAuthTokens/refresh`, `attestation/generate`. `mcpServerStatus/list` feeds only MCP apps (T3 has no Settings MCP list for Codex; text generation uses `codex mcp list --json`, already answered).
+Item types T3 ignores (hookPrompt, imageView, sleep, review mode, image generation) are not produced.
+
 ## Codex everywhere (desktop + mobile) [track codex-everywhere]
 
 `desktop-linux.yml`, `android-app.yml`, `ios-app.yml` take `-f mock_provider=grok|codex|both` (default `grok` = unchanged), exported as `MOCK_PROVIDER`.

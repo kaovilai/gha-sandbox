@@ -974,7 +974,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
           .map(([name, tools]) => ({
             name,
             authStatus: "unsupported",
-            tools: Object.fromEntries([...tools.values()].map((tl) => [tl.name, { name: tl.name, title: tl.title ?? null, description: tl.description ?? null, inputSchema: tl.inputSchema ?? { type: "object", properties: {} }, ...(tl.visibility ? { _meta: { ui: { visibility: tl.visibility } } } : {}) }])),
+            tools: Object.fromEntries([...tools.values()].map((tl) => [tl.name, { name: tl.name, title: tl.title ?? null, description: tl.description ?? null, inputSchema: tl.inputSchema ?? { type: "object", properties: {} }, ...(tl.annotations ? { annotations: tl.annotations } : {}), ...(tl.visibility ? { _meta: { ui: { visibility: tl.visibility } } } : {}) }])),
             resources: [],
             resourceTemplates: [],
           }));
