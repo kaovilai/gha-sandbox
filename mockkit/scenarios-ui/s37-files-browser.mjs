@@ -5,10 +5,15 @@
 // opened tab is asserted). Previews: source (text), markdown (source, then the RENDERED preview via the toggle), csv table,
 // svg image (loaded <img>). Plus tree search and the Ctrl+P file picker.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
-import { bodyText, dumpPage, expectBody, expectText, expectVisible, startSession } from "../lib/ui.mjs";
+import { MASK_HOME, MASK_HOST } from "../lib/mask.mjs";
+import { bodyText, dumpPage, expectBody, expectNoLocator, expectText, expectVisible, sendPrompt, startSession } from "../lib/ui.mjs";
 import { must } from "../lib/ui-extra.mjs";
+
+// Runner identity that really appears inside SHADOW DOM surfaces (file tree row label, code view, diff panel): the masking proof.
+const HOST = hostname().split(".")[0];
 
 function seedFiles(ws) {
   mkdirSync(join(ws, "docs"), { recursive: true });
@@ -23,8 +28,12 @@ function seedFiles(ws) {
     '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" viewBox="0 0 240 120"><rect width="240" height="120" rx="16" fill="#1e293b"/><circle cx="60" cy="60" r="32" fill="#38bdf8"/><rect x="110" y="40" width="100" height="14" rx="7" fill="#f8fafc"/><rect x="110" y="66" width="70" height="14" rx="7" fill="#94a3b8"/></svg>\n',
   );
   writeFileSync(join(ws, "data/people.csv"), "name,team,score\nAda,core,91\nGrace,infra,88\nLinus,kernel,95\n");
+  // text that names the runner: a log file called after the host (tree row label) and a note with absolute paths (code view, later the diff)
+  mkdirSync(join(ws, "logs"), { recursive: true });
+  writeFileSync(join(ws, "logs", `${HOST}.log`), `boot ok on ${HOST}\n`);
+  writeFileSync(join(ws, "docs/ci-env.txt"), `cwd=${ws}\nhost=${HOST}\n`);
   const g = (...a) => execFileSync("git", a, { cwd: ws, stdio: "inherit", env: { ...process.env, GIT_AUTHOR_NAME: "Mock", GIT_AUTHOR_EMAIL: "mock@example.invalid", GIT_COMMITTER_NAME: "Mock", GIT_COMMITTER_EMAIL: "mock@example.invalid" } });
-  g("add", "docs", "assets", "data");
+  g("add", "docs", "assets", "data", "logs");
   g("commit", "-q", "-m", "Add docs and assets");
 }
 
@@ -179,6 +188,37 @@ export default async function ({ page, shot, env }) {
     await expectBody(page, /assets\/logo\.svg|logo\.svg/, "file picker result for 'logo'");
     await shot("file-picker");
     await page.keyboard.press("Escape");
+  });
+  // masking in SHADOW DOM: tree row label, code view and diff panel all show text that names the runner (host, absolute workspace path)
+  await step("masked runner identity (tree, code view, diff)", async () => {
+    await expand("logs", `logs/${HOST}.log`);
+    await expectText(page, `${MASK_HOST}.log`, `tree row label masked ('${MASK_HOST}.log', shadow DOM)`);
+    await expectNoLocator(page, page.getByText(HOST), `real host name '${HOST}' visible somewhere (tree row label?)`);
+    await shot("masked-tree");
+    await open("docs", "ci-env.txt");
+    await expectText(page, `cwd=${MASK_HOME}/demo-app`, "code view shows the masked workspace path (shadow DOM)");
+    await expectText(page, `host=${MASK_HOST}`, "code view shows the masked host name (shadow DOM)");
+    await expectNoLocator(page, page.getByText(env.MOCKKIT_WS), "real workspace path visible in the code view");
+    await shot("masked-code-view");
+    // Diff/Changes exist only for a real server thread: one echo turn turns the draft into one
+    await sendPrompt(page, "Summarize the CI environment notes.");
+    await page.getByText(/turn 1/).first().waitFor({ timeout: 60_000 });
+    // a working-tree change that names the paths: the Diff panel (shadow DOM) renders the added line
+    appendFileSync(join(env.MOCKKIT_WS, "docs/ci-env.txt"), `changed: ${env.MOCKKIT_WS}/docs on ${HOST}\n`);
+    await page.waitForTimeout(1500);
+    const changes = page.getByRole("button", { name: /Changes/ }).first();
+    await must(page, changes, "header Changes button");
+    await changes.click();
+    await page.waitForTimeout(2000);
+    await expectText(page, "docs/ci-env.txt", "diff panel row docs/ci-env.txt");
+    const box = await page.getByText("docs/ci-env.txt", { exact: true }).first().boundingBox();
+    if (!box) throw new Error("assertion failed: no diff header box for docs/ci-env.txt");
+    await page.mouse.click(Math.max(2, box.x - 42), box.y + box.height / 2); // chevron left of the header opens the hunk
+    await page.waitForTimeout(1200);
+    await expectText(page, new RegExp(`changed: ${MASK_HOME}/demo-app/docs on ${MASK_HOST}`), "diff added line shows the masked path + host (shadow DOM)");
+    await expectNoLocator(page, page.getByText(env.MOCKKIT_WS), "real workspace path visible in the diff panel");
+    await expectNoLocator(page, page.getByText(HOST), `real host name '${HOST}' visible in the diff panel`);
+    await shot("masked-diff-panel");
   });
   await dumpPage(page, "s37 final");
   if (failures.length) throw new Error(`file previews failed: ${failures.join(", ")}`);

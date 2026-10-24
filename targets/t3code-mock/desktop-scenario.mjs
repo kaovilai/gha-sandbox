@@ -14,7 +14,7 @@ import { chromium } from "playwright";
 import { labelOf, resolveScenarios } from "../../mockkit/lib/resolve.mjs";
 import { bootDesktop } from "../../mockkit/lib/desktop.mjs";
 import { native, rootShot, sleep, windowTree } from "../../mockkit/lib/native.mjs";
-import { buildMaskRules, installMaskPage, maskNow } from "../../mockkit/lib/mask.mjs";
+import { buildMaskRules, installMaskPage, maskGuard } from "../../mockkit/lib/mask.mjs";
 import { assertShell, dumpPage } from "../../mockkit/lib/ui.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -121,16 +121,17 @@ for (const entry of ids) {
     await assertShell(page, `desktop shell (${id})`, 90_000);
     // mask runner hostname / absolute paths in the renderer DOM (root X11 captures and the x11grab video show the masked text)
     const maskRules = buildMaskRules({ ws: app.ws, root: app.root });
+    const guard = maskGuard(maskRules); // every screenshot is leak-checked (light DOM + shadow DOM + inputs); a leak FAILS the scenario
     await installMaskPage(page, maskRules);
     const nat = native(app.win);
-    const env = { ...process.env, MOCKKIT_PROVIDER: entry.prov, MOCKKIT_WS: app.ws, MOCK_CONTROL_DIR: app.ctl, MOCK_LOG: app.mockLog };
+    const env = { ...process.env, MOCKKIT_PROVIDER: entry.prov, MOCKKIT_WS: app.ws, MOCKKIT_STATE: app.state, MOCKKIT_ROOT: app.root, MOCK_CONTROL_DIR: app.ctl, MOCK_LOG: app.mockLog };
     process.env.APP_URL = page.url();
     writeFileSync(join(out, `${id}-windows.txt`), windowTree());
     rec = startRecording(join(out, `${id}.mp4`));
     await sleep(800);
     const shot = async (name, opts = {}) => {
       const path = join(out, `${id}-${name}.png`);
-      await maskNow(page, maskRules);
+      await guard.beforeShot(page);
       if (opts.clip) return page.screenshot({ path, ...opts });
       return rootShot(path);
     };
@@ -141,6 +142,7 @@ for (const entry of ids) {
       await dumpPage(page, `${id} failure`).catch(() => {});
       throw e;
     }
+    guard.assertClean(id);
   } catch (e) {
     ok = false;
     console.log(`scenario ${id} error: ${e?.stack ?? e}`);

@@ -17,6 +17,7 @@ export default {
         kind: command ? "command" : "monitor",
         persistent: !command,
         until: ctx.args.until,
+        kill: ctx.args.kill === "1" || ctx.args.kill === true,
       }),
       S.say("\nThe dev server is running in the background. I'll check on it when it finishes."),
     ];

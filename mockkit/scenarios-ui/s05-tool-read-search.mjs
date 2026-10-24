@@ -18,7 +18,13 @@ export default async function ({ page, shot, env }) {
   if (await group.isVisible().catch(() => false)) await group.click().catch(() => {});
   await page.waitForTimeout(1000);
   if (codex) {
-    console.log(`FINDING codex rows listed after expanding: README=${/README\.md/.test(await bodyText(page))}`);
+    // Codex shows each call as a command row (`cat <file>` for reads, the search command for the search): assert all three child rows
+    await expectBody(page, /cat README\.md/, "codex child row 'cat README.md'");
+    await expectBody(page, /cat package\.json/, "codex child row 'cat package.json'");
+    await expectBody(page, /rg [^\n]*greet/, "codex child row for the search ('rg ... greet ...')");
+    // the group really lists exactly the three calls (not just the summary text): three rows under 'Ran 3 commands'
+    const rows = (await bodyText(page)).split("\n").filter((l) => /^(cat README\.md|cat package\.json|rg .*greet.*)$/.test(l.trim()));
+    if (rows.length !== 3) throw new Error(`assertion failed: expected exactly 3 codex child rows (cat README.md, cat package.json, rg greet), got ${rows.length}: ${JSON.stringify(rows)}`);
   } else {
     await expectBody(page, /Read [^\n]*README\.md/, "tool row 'Read ... README.md'");
     await expectBody(page, /Read [^\n]*package\.json/, "tool row 'Read ... package.json'");

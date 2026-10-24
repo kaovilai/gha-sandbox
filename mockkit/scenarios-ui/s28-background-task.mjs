@@ -11,7 +11,7 @@ const BANNER = /Running: [^\n]*Watch the dev server/;
 
 export default async function ({ page, shot, env }) {
   await startSession(page, env);
-  await ask(page, env, "background-task", "Watch the dev server in the background.", { until: "bg28" });
+  await ask(page, env, "background-task", "Watch the dev server in the background.", { until: "bg28", kill: "1" });
   // the turn itself ends normally (thread is Done)...
   await expectText(page, /The dev server is running in the background\./, "assistant closing sentence of the turn", 60_000);
   await waitReached("bg28", 60_000, env); // the command has exited; only the held completion report is outstanding
