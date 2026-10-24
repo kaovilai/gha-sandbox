@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { MASK_HOME, MASK_HOST } from "../lib/mask.mjs";
+import { MASK_HOME, MASK_HOST, maskStats } from "../lib/mask.mjs";
 import { bodyText, dumpPage, expectBody, expectNoLocator, expectText, expectVisible, sendPrompt, startSession } from "../lib/ui.mjs";
 import { must } from "../lib/ui-extra.mjs";
 
@@ -190,16 +190,24 @@ export default async function ({ page, shot, env }) {
     await page.keyboard.press("Escape");
   });
   // masking in SHADOW DOM: tree row label, code view and diff panel all show text that names the runner (host, absolute workspace path)
-  await step("masked runner identity (tree, code view, diff)", async () => {
+  // (three independent steps: each reports its own finding, one CI run shows which surface still leaks)
+  await step("masked tree row label", async () => {
     await expand("logs", `logs/${HOST}.log`);
-    await expectText(page, `${MASK_HOST}.log`, `tree row label masked ('${MASK_HOST}.log', shadow DOM)`);
+    const row = fileRow(page, `logs/${HOST}.log`);
+    const label = (await row.evaluate((e) => e.textContent)) ?? "";
+    console.log(`FINDING tree row for logs/${HOST}.log shows ${JSON.stringify(label.trim())} (shadow roots observed: ${JSON.stringify(await maskStats(page))})`);
+    if (label.includes(HOST) || !label.includes(MASK_HOST)) throw new Error(`assertion failed: tree row label should show '${MASK_HOST}' and not '${HOST}', got ${JSON.stringify(label.trim())}`);
     await expectNoLocator(page, page.getByText(HOST), `real host name '${HOST}' visible somewhere (tree row label?)`);
     await shot("masked-tree");
+  });
+  await step("masked code view", async () => {
     await open("docs", "ci-env.txt");
     await expectText(page, `cwd=${MASK_HOME}/demo-app`, "code view shows the masked workspace path (shadow DOM)");
     await expectText(page, `host=${MASK_HOST}`, "code view shows the masked host name (shadow DOM)");
     await expectNoLocator(page, page.getByText(env.MOCKKIT_WS), "real workspace path visible in the code view");
     await shot("masked-code-view");
+  });
+  await step("masked diff panel", async () => {
     // Diff/Changes exist only for a real server thread: one echo turn turns the draft into one
     await sendPrompt(page, "Summarize the CI environment notes.");
     await page.getByText(/turn 1/).first().waitFor({ timeout: 60_000 });
