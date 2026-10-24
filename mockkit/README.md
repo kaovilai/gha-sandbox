@@ -296,8 +296,8 @@ Protocol recon: `@anthropic-ai/claude-agent-sdk` 0.3.276 (`sdk.mjs` / `sdk.d.ts`
 * **Text generation.** `-p ... --json-schema S`: JSON for the schema's `properties` keys (shared `lib/textgen.mjs`; titles from the scenario, commit subject "Update files via mock agent", S24).
 * **Limits (honest).** T3 renders assistant text only from the completed `assistant` snapshot (it ignores `text_delta`), so Claude text appears per finished block, not word by word: the mock closes a
   text block after 350 ms without a delta so held/paused turns still show their text, and a long single `say` (S03) shows up whole. Thinking and tool rows do stream live. Model names, version and the
-  context window ("190k/1m") come from T3's bundled manifest, not from the mock; every answer is scripted. No subagents (`Agent` tool), background tasks, hooks, MCP tool calls, skills, `/compact` execution
-  (T3 adds the command itself), file checkpointing / rewind, image blocks or `get_context_usage` realism. The tool path in approval cards is the absolute runner path (Claude sends absolute `file_path`).
+  context window ("190k/1m") come from T3's bundled manifest, not from the mock; every answer is scripted. Subagents (`Agent` tool), background tasks, hooks, MCP tool calls, skills, `/compact`, rewind, image blocks, web tools: see "Claude gaps closed" below. Still absent: `get_context_usage` realism and the items listed there.
+  The tool path in approval cards is the absolute runner path (Claude sends absolute `file_path`).
   Settings > Providers still lists the disabled built-in Codex/Grok rows, and S20 deliberately seeds Grok next to Claude.
   No dynamic-tool or background-terminal frames are produced (permission, MCP elicitation, subagent, goal, revert, MCP app, web search and retry frames are: see "Codex gaps closed" below). `thread/compact/start` runs a bare `contextCompaction` turn. Agent messages are `phase:"final_answer"` unless a scenario says `phase:"commentary"`.
   The file-change approval card shows the absolute runner path of the file (Codex sends absolute paths). Switching provider mid-thread (S20) leaks T3's handoff prompt into the
@@ -359,6 +359,33 @@ Codex sends the goal's first turn before `thread/goal/set active`: a scenario th
   it remounts the thread (scene toggle + reopen) and requires the text there (`s40-streaming-held-remounted.png`, `s40-complete-remounted.png`). `open_thread` retries via scene toggle; BACK from the list
   leaves the app, so it is never the fallback. In `both` mode gate/hold release files are cleared before each gated scenario (the Grok pass otherwise pre-releases the Codex pass's gates).
   Note: S03 table content is scripted text and still lists "grok (mock)" as a table row; that is scenario content, not provider branding.
+
+## Claude gaps closed (track claude-gaps)
+
+Audit of T3's `ClaudeAdapterV2.ts` + recorded SDK transcripts (`orchestration-v2/testkit/fixtures/claude_*`, t3code main 2026-10-23) against `adapters/claude.mjs`.
+New pack `claude-extra` (`scenarios=claude-extra`, drivers s60-s71, runs named `claude-<driver>`); unit tests `test/claude-gaps.test.mjs`. New provider-neutral IR ops
+(`lib/ir.mjs`): `skill`, `hook`, `compact`, `notice`, `bgControl`; extended `tool` (`name`/`server`/`display`/`serverDisplay`), `web` (`fetch`, `results`), `read` (image files), `bgTask`
+(live output + kill handle); reused `subagent`, `bgTask`, `retry`, `goal`, `web`. ACP / Codex adapters degrade them (plain tool call, a `say`, or no-op).
+
+| Gap | Wire form the mock now sends | Driver |
+| --- | --- | --- |
+| Subagents | `Agent` tool_use, `system task_started {task_type:local_agent}`, child `user`/`assistant` frames with `parent_tool_use_id`, `task_progress`, `task_updated`, `task_notification`, Agent `tool_result` | s60 |
+| Background Bash | `Bash {run_in_background:true}`, `background_tasks_changed` roster, `task_started {task_type:local_bash}`, ack `tool_result`; after the turn: roster + `task_updated` + `task_notification`, then a wake turn (`init` / assistant / `result`, no user message) | s61 |
+| `TaskOutput` / `TaskStop` | tool_use rows, `<retrieval_status>` text (shape approximated), stop = roster + `task_updated killed` + `task_notification stopped` + the real process killed (current CLI names; the legacy `BashOutput`/`KillShell` are not emitted) | s61 |
+| Monitor | `Monitor {persistent}` tool_use + `Monitor started` ack, `stream ended` notification | s62 |
+| Hooks | `hook_started` / `hook_response` system frames | s63 |
+| MCP tools | `mcp__<server>__<tool>` tool_use + `tool_use_meta {display_name, server_display_name}`; servers in `init.mcp_servers` + `mcp_status` | s64 |
+| Skills / slash commands | `<cwd>/.claude/skills/<n>/SKILL.md` listed in `init.skills`; user message ending `/<n> args` -> scenario `skill-run` (`Skill` tool_use + SKILL.md `Read`) | s65 |
+| `/compact`, auto-compaction | `status compacting` -> `status {compact_result}` -> `compact_boundary {pre_tokens, post_tokens}` + synthetic summary + `result {local_command:"compact"}`; later turns start from the compacted size | s66 |
+| Rewind | `--resume=<id> --resume-session-at=<assistant uuid>`: the mock persists the last root assistant uuid per turn and drops later turns | s67 |
+| Images | user `image` content blocks decoded (PNG/GIF header) and described; `Read` of an image file returns an `image` block | s68 |
+| WebSearch / WebFetch | `WebSearch` with structured `{query, results:[{content:[{title,url}]}], durationSeconds}`, `WebFetch {url, prompt}` | s69 |
+| `api_retry`, notices | `system api_retry {attempt, max_retries, retry_delay_ms, error_status}`, `system informational {level}` | s70 |
+| `/goal` | synthetic `Goal set:` / `Goal active:` / `Goal cleared:` assistant lines + `Stop hook feedback` user frames | s71 |
+
+Not built (honest): background *subagents* (`run_in_background` Agent + `SendMessage` resume), nested subagents, subagent permission prompts, `claude_ai_*` connector tool names, `forkSession` / thread fork
+(T3 reads the CLI's own transcript JSONL from disk, which the mock does not write), `/context` / `/cost` local-command output, file checkpointing (`rewindFiles`), `ToolSearch`, MCP elicitation for Claude.
+T3 side: its Claude adapter has no handler for `hook_*` frames (not rendered) and MCP server status is not shown anywhere in the UI; the drivers record what is actually rendered as `FINDING` lines.
 
 ## Known limits
 
