@@ -17,7 +17,7 @@ orphan `evidence` branch (raw URLs serve `image/*`, so PNG/GIF embed inline in P
 | iOS app | `ios-app.yml` | Working: simulator + native build + seeded screenshots; `-f live=true` also drives mock threads S40-S42 (fresh pairing per attempt); default-path pairing can still flake |
 | Emulator capability probes | `emulators.yml` | Working: Android + iOS boot, screenshot, recording |
 | Re-publish any run's artifacts | `publish-run.yml` | Working |
-| Mock kit (keyless AI) | `mockkit/` | Working, three flavors (Grok/ACP, Codex app-server, Claude stream-json): web packs web 11, wide 15, codex 17+10+8, claude 20+12; desktop (Electron) x all flavors incl. 10-driver `desktop-wide`; Android + iOS live S40-S42 x all flavors via `mock_provider=grok\|codex\|claude\|both\|all`. Android live has a known blank-UI-tree flake under fix. See `mockkit/README.md` |
+| Mock kit (keyless AI) | `mockkit/` | Working, three flavors (Grok/ACP, Codex app-server, Claude stream-json): web packs web 11, wide 15, codex 17+10+8, claude 20+12; desktop (Electron) x all flavors incl. 10-driver `desktop-wide`; Android + iOS live S40-S42 x all flavors via `mock_provider=grok\|codex\|claude\|both\|all`. Android live uses an idle-free UI dump with OCR fallback (no more blank-tree flake; see mockkit/README.md "Android UI proof ladder"). See `mockkit/README.md` |
 
 ## Using it for other projects (profiles)
 
