@@ -369,7 +369,7 @@ Codex sends the goal's first turn before `thread/goal/set active`: a scenario th
   step completes (run 39935674895). S07 therefore stills the genuine in-progress state (`running-live-status`) and the completed
   output (`done`); a driver FINDING line records it. A `running-midstream` shot is only taken if "step 3/8".."5/8" ever appears in the DOM.
 * Cost of isolation: one cold `vp run dev` boot per scenario (~30 s each) instead of one shared server.
-* Runner hostname (`runnervm...`) and absolute runner/workspace paths are masked in the DOM of every web shot/video (`lib/mask.mjs`); canvas/xterm text and shadow-DOM text are not covered.
+* Runner hostname (`runnervm...`) and absolute runner/workspace paths are masked in the DOM of every web shot/video (`lib/mask.mjs`), including shadow DOM, canvas (terminal) text and focused inputs (see "Tighten round 2"). Not masked: iOS/Android app screens (the native apps draw simulator/emulator temp paths in approval cards; they run outside any page we can script: documented, nothing to do).
 * Mock state is per process (per session); `session/load` after a respawn starts with turn 0.
 * No fake credential file is written on purpose (the Grok usage probe would call the network).
 
@@ -379,7 +379,7 @@ Codex sends the goal's first turn before `thread/goal/set active`: a scenario th
 - (fixed, see "Evidence hardening") S24 message source, S28 background-task UI, S37 tree clicks + rendered markdown, S20 leaked handoff prompt.
 - S07: T3 does not render in-progress stdout, so no mid-stream output still exists (an in-progress status still + the completed output are captured).
 - S40 clip is a 30 s tail starting at the held state; early growth is in the timed PNGs. The `s40-held` UI dump can have 0 nodes (vacuous guard); server truth is the real check.
-- Hostname/path masking is DOM text replacement: input values are masked only while no field is focused; the desktop path installs the same mask over CDP (verified in CI, run 40014597750: s03/s06/s08 green, the root X11 capture shows `sandbox-vm`).
+- Hostname/path masking is DOM text replacement (round 2 extended it to shadow DOM, canvas text and focused inputs, see "Tighten round 2"); the desktop path installs the same mask over CDP (verified in CI, run 40014597750: s03/s06/s08 green, the root X11 capture shows `sandbox-vm`).
 - Claude pack: S03 "streaming" and "done" shots look alike (T3 shows Claude text per finished block); S18's detail pane is the Claude card only because the driver clicks `Select Claude`; the account email is blurred by T3. Plan-mode UI (S11b) exists only with the client setting `planModeEnabled` (the driver sets it). Claude-pack drivers s22/s23 are Claude-only and pass vacuously (FINDING line) when run for another provider.
 - iOS live (`mobile-live.sh ios`) verified green for Grok and Codex (run 40029083323); simulator temp paths show in approval cards. Non-live iOS still uses upstream pairing.
 
@@ -417,3 +417,35 @@ CI: `sandbox.yml` with `scenarios=web`, `wide` and `codex` on branch `track-tigh
   `Show rendered markdown` -> real `<h1>`/list/table. Image: `<img alt="assets/logo.svg">` with decoded pixels.
 - Runner hostname still visible in the project panel in web/desktop shots (mask in scenarios when it matters).
 - iOS live (`ios-app.yml -f live=true`): verified green in CI (S40/S41/S42, see "iOS live pairing"). Runner CPU contention makes every step slow (CLI `thread show` ~10 s, session fetch can time out), so state is proven by PNGs + server truth; timings in the shots ("Working 1m 02s") are not meaningful.
+
+## Tighten round 2 (track tighten-2)
+
+Residual evidence weaknesses from round 1, and what each fix proves (CI runs: see the end of this section).
+
+* **Masking** (`lib/mask.mjs`, unit tests `test/mask.test.mjs` + `test/mask-browser.test.mjs`, the latter drives a real Chromium and is skipped where playwright/a browser is missing):
+  * *Shadow DOM* (diff panel, file tree, code views): `Element.prototype.attachShadow` is wrapped, so every new shadow root (open or closed) gets its own MutationObserver; roots that predate the
+    init script (desktop attaches over CDP after load) are found by walking `el.shadowRoot`; a 1.5 s safety-net sweep re-walks everything. The `MASK-LEAK` check reads `body.innerText` PLUS every shadow root's text PLUS field values.
+  * *Canvas text* (the terminal is a Ghostty WASM surface painted with `CanvasRenderingContext2D.fillText`, there is no DOM text): `fillText` is wrapped; the string is rewritten before it is drawn and padded with trailing
+    spaces to its old length (the renderer draws monospace style runs at fixed columns, so the cursor stays aligned). `maskStats(page)` returns `{canvasDraws, canvasMasked, roots, overlays}`; s35 asserts both
+    counters are non-zero (the mask engaged), then the PNG is read.
+  * *Focused inputs*: a focused `<input>`/`<textarea>` is never written to (a driver may be typing the real path; changing the value would corrupt what the app receives). A transparent-pointer overlay with the masked text is drawn
+    over it instead, so screenshots/video are masked while the real value is intact; blur rewrites the value and drops the overlay. Unfocused fields are rewritten per field (not "nothing while any field has focus" as before).
+  * `~`-relative spellings (`~/work/_temp/...`, shell prompt `\w`) and `/home/runner/work/...` are masked on web and desktop (approval cards, terminal).
+  * `maskGuard(rules)` (both runners): every screenshot is leak-checked; any leak FAILS the scenario instead of only logging `MASK-LEAK`.
+  * Proof drivers: **s37** seeds `logs/<hostname>.log` + `docs/ci-env.txt` (absolute workspace path, host) and asserts the tree row label, the code view and the Diff panel show only `sandbox-vm` / `/home/dev/demo-app`
+    (`expectNoLocator`: Playwright locators pierce shadow DOM, `body.innerText` does not). **s35-terminal** (new, in `wide` and `desktop-wide`) opens the thread terminal drawer, types into the real shell and proves the command ran
+    (proof file outside the repo: cwd == workspace, real hostname) while the canvas shows the masked prompt/output.
+  * Not covered (honest): iOS/Android app screenshots. The native apps draw simulator/emulator temp paths (e.g. approval cards show `/var/mobile/...` / `/data/user/...` style paths) and run outside any scriptable page,
+    so there is nothing to patch; they are documented, not hidden. Text split across several DOM nodes (a path broken over spans) cannot match a per-node rule; the `MASK-LEAK` check (which concatenates `textContent`) would still flag it.
+* **s05 (Codex)**: the three child rows are asserted (`cat README.md`, `cat package.json`, `rg ... greet ...`, exactly three), not just logged.
+* **s12**: the "turn is still running" check is structural: the composer still offers Stop and the Tasks header counts `5/6` (not `6/6`) while held; after release Stop disappears. No closing-sentence wording dependency for the negative.
+* **Desktop wide** (`desktop-linux.yml -f mock=true -f scenarios=desktop-wide`, `-codex` variant, or `-f mock_provider=both`): the web drivers run unchanged inside the real Electron window over CDP: s05, s07, s09, s10, s12, s13, s14, s15, s17, s35. The desktop env now also gets
+  `MOCKKIT_STATE` / `MOCKKIT_ROOT` (s14 seeds an upstream-agent instance into `settings.json`).
+* **s21 flake, root cause**: T3's `openAddProjectFlow` (`CommandPalette.tsx`) navigates to `/settings/connections` when no environment is in the `connected` phase (`canCreateProjectInEnvironment`). The sidebar "Add project" button renders before the
+  websocket connects, and `page.reload()` (which s21 used to turn on `contextWindowMeterEnabled` through localStorage) re-creates the environment registry, so the click raced the reconnect (path typed into the settings search, ~2 of 5 runs).
+  s21 now flips the real switch (Settings > General > Legacy features > "Context window indicator (legacy)") client-side, no reload, Escape returns to the app. `addProject` keeps its retry as a safety net for other reloads.
+* **s28 banner / Stop**: investigated against T3 (`packages/provider-acp/src/server/adapter.ts`, `provider-grok/xaiAcpExtension.ts`) and the recorded real Grok 1.0.41 monitor transcript (`fixtures/grok_monitor`): real Grok never sends a completed status
+  for the monitor item (it streams `in_progress` Bash ticks and ends the monitor only with `_x.ai/task_completed`); T3 closes the item from that notification only while the owning root turn is still open (`finishRegisteredBackgroundTool` returns when the
+  context is finalized), and persistent monitors are exempt from holding the turn open. So for a persistent monitor that ends after its turn, the lingering "Running: ..." banner is T3 behaviour and the real remedy is the user's Stop (what the driver does).
+  The mock can additionally reap the task with `kill_command_or_subagent` (`bgTask kill:true`, queue arg `kill=1`, a completed `KillTask`/`already_exited` frame that T3 treats as an end signal); s28 uses it and logs whether the banner cleared on its own.
+
