@@ -108,7 +108,8 @@
     "s67-claude-rewind",
     "s68-claude-images",
     "s69-claude-web",
-    "s70-claude-retry-notice"
+    "s70-claude-retry-notice",
+    "s71-claude-goal"
   ],
   "codex-extra": [
     "s50-mcp-elicitation",

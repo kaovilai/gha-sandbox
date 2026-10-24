@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { toolFor } from "../adapters/claude.mjs";
 import { S, runSteps } from "../lib/ir.mjs";
+import { enqueue } from "../lib/queue.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bin = join(here, "../bin/t3-mock-claude.mjs");
@@ -340,6 +341,39 @@ test("api_retry system frames (provider-retry scenario) and informational notice
   const n = sys(c.frames, "informational")[0];
   assert.equal(n.level, "warning");
   assert.match(n.content, /fallback model/);
+});
+
+test("/goal: synthetic 'Goal set' line, goal-work turn, 'Goal cleared' when the scenario completes the goal", async () => {
+  const c = client();
+  c.user("/goal Make the greeting friendlier");
+  await c.result();
+  const synth = () => c.frames.filter((f) => f.type === "assistant" && f.message.model === "<synthetic>").map((f) => f.message.content[0].text);
+  assert.deepEqual(synth(), ["Goal set: Make the greeting friendlier", "Goal cleared: Make the greeting friendlier"]);
+  assert.match(texts(c.frames).join(""), /the goal is met/);
+  assert.equal(c.frames.filter((f) => f.type === "user" && f.isSynthetic).length, 0, "a completed goal produces no evaluator feedback");
+  c.user("/goal clear");
+  await c.result(2);
+  assert.equal(synth().at(-1), "No goal set.");
+});
+
+test("/goal with an unmet goal: Stop hook feedback user frame + 'Goal active (N turn)' line; bare /goal reports; /goal clear clears", async () => {
+  const cwd = workspace();
+  const env = { MOCK_CONTROL_DIR: join(cwd, ".ctl") };
+  enqueue("echo", {}, { cwd, env });
+  const c = client({ cwd });
+  c.user("/goal Ship it");
+  await c.result();
+  const synth = () => c.frames.filter((f) => f.type === "assistant" && f.message.model === "<synthetic>").map((f) => f.message.content[0].text);
+  assert.deepEqual(synth(), ["Goal set: Ship it", "Goal active: Ship it (1 turn)"]);
+  const fb = c.frames.filter((f) => f.type === "user" && f.isSynthetic);
+  assert.equal(fb.length, 1);
+  assert.equal(fb[0].message.content[0].text, "Stop hook feedback:\n[Ship it]: The goal is not met yet.");
+  c.user("/goal");
+  await c.result(2);
+  assert.equal(synth().at(-1), "Goal active: Ship it (1 turns)");
+  c.user("/goal clear");
+  await c.result(3);
+  assert.equal(synth().at(-1), "Goal cleared: Ship it");
 });
 
 test("toolFor: MCP identity, native name override, fetch kind", () => {

@@ -179,6 +179,7 @@ export function serveClaude({ input = process.stdin, output = process.stdout, en
     baseTokens: saved?.baseTokens ?? 1200, // context size after the last /compact (input tokens grow from here)
     baseTurns: saved?.baseTurns ?? 0, // history length at that point
     lastInTok: saved?.lastInTok ?? 0,
+    goal: saved?.goal ?? null, // /goal objective + evaluator checks
     mcpServers: new Set(),
     busy: false, // a user/wake turn is running (background completions wait for the next idle moment)
   };
@@ -200,7 +201,7 @@ export function serveClaude({ input = process.stdin, output = process.stdout, en
   const persist = () => {
     try {
       mkdirSync(stateDir, { recursive: true });
-      writeFileSync(join(stateDir, `${sid}.json`), JSON.stringify({ id: sid, model: session.model, permissionMode: session.permissionMode, turn: session.turn, history: session.history, tokens: session.tokens, costUsd: session.costUsd, turnUuids: session.turnUuids, baseTokens: session.baseTokens, baseTurns: session.baseTurns, lastInTok: session.lastInTok }));
+      writeFileSync(join(stateDir, `${sid}.json`), JSON.stringify({ id: sid, model: session.model, permissionMode: session.permissionMode, turn: session.turn, history: session.history, tokens: session.tokens, costUsd: session.costUsd, turnUuids: session.turnUuids, baseTokens: session.baseTokens, baseTurns: session.baseTurns, lastInTok: session.lastInTok, goal: session.goal }));
     } catch {}
   };
 
@@ -627,6 +628,12 @@ export function serveClaude({ input = process.stdin, output = process.stdout, en
       const q = dequeue(session.cwd, { ...process.env, ...env }); // a driver may queue `compact hold=<gate>` to pin the running state
       return { tag: { id: "compact", args: q?.id === "compact" ? q.args : {}, text: req, queued: Boolean(q) }, scenario: scenarios.get("compact"), slash };
     }
+    if (slash?.name === "goal") {
+      // `/goal <objective>`: the CLI evaluates a goal after every turn; the default work scenario is goal-work (queue entry may override / add hold=<gate>)
+      const q = dequeue(session.cwd, { ...process.env, ...env });
+      const tag = q ? { id: q.id, args: q.args, text: req, queued: true } : { id: "goal-work", args: {}, text: req };
+      return { tag, scenario: scenarios.get(tag.id) || scenarios.get("goal-work"), slash };
+    }
     const skill = slash ? skillInfo(slash.name) : null;
     if (skill) return { tag: { id: "skill-run", args: {}, text: req }, scenario: scenarios.get("skill-run"), slash, skill };
     const q = dequeue(session.cwd, { ...process.env, ...env });
@@ -704,9 +711,39 @@ export function serveClaude({ input = process.stdin, output = process.stdout, en
       nextToolId: () => `toolu_mock_${++nextTool}`,
     };
     log("prompt", { scenario: scenario.id, turn: session.turn, tag: tag?.id ?? null, queued: Boolean(tag?.queued), text: ctx.text.slice(0, 200), images: images.length });
+    // `/goal` (Claude reports it only through synthetic transcript lines: "Goal set: X", "Stop hook feedback" user frames, "Goal active: X (N turns)",
+    // "Goal cleared: X"; T3 ClaudeAdapterV2.nextClaudeGoal turns them into the thread goal)
+    const isGoal = slash?.name === "goal" && !parseTag(req);
+    let skipSteps = false;
+    rt.sink.goal = (a) => {
+      const g = session.goal;
+      if (!g || a.status !== "complete") return;
+      session.goal = null;
+      rt.synthetic(`Goal cleared: ${g.objective}`);
+    };
+    if (isGoal) {
+      const arg = slash.args;
+      if (/^(clear|stop|off|reset|none|cancel)$/i.test(arg)) {
+        const g = session.goal;
+        session.goal = null;
+        rt.synthetic(g ? `Goal cleared: ${g.objective}` : "No goal set.");
+        skipSteps = true;
+      } else if (!arg) {
+        rt.synthetic(session.goal ? `Goal active: ${session.goal.objective} (${session.goal.checks} turns)` : "No goal set.");
+        skipSteps = true;
+      } else {
+        session.goal = { objective: arg, checks: 0 };
+        rt.synthetic(`Goal set: ${arg}`);
+      }
+    }
     let failure = null; // { kind, message } | "interrupted"
     try {
-      await runSteps(scenario.steps(ctx), rt.sink, ctx);
+      if (!skipSteps) await runSteps(scenario.steps(ctx), rt.sink, ctx);
+      if (isGoal && !skipSteps && session.goal) {
+        session.goal.checks += 1;
+        write({ type: "user", message: { role: "user", content: [{ type: "text", text: `Stop hook feedback:\n[${session.goal.objective}]: The goal is not met yet.` }] }, parent_tool_use_id: null, isSynthetic: true, timestamp: nowIso(), ...base() });
+        rt.synthetic(`Goal active: ${session.goal.objective} (${session.goal.checks} turn${session.goal.checks === 1 ? "" : "s"})`);
+      }
     } catch (e) {
       if (e?.name === "AbortError" || ac.signal.aborted) failure = "interrupted";
       else if (e instanceof ScenarioError) failure = { kind: e.kind === "usage_limit" ? "usage_limit" : /rate.?limit/i.test(e.message) ? "rate_limit" : "api", message: e.message };
