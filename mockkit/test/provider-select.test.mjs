@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { labelOf, resolveScenarios } from "../lib/resolve.mjs";
+import { expandProviders, labelOf, resolveScenarios } from "../lib/resolve.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const drivers = ["dk01-window-chrome", "s03-markdown-stream", "s08-approval-allow"];
-const packs = { desktop: ["s03-markdown-stream", "dk01-window-chrome"], "desktop-codex": ["s03-markdown-stream", "dk01-window-chrome"], codex: ["s03-markdown-stream"] };
+const packs = { desktop: ["s03-markdown-stream", "dk01-window-chrome"], "desktop-codex": ["s03-markdown-stream", "dk01-window-chrome"], "desktop-claude": ["s03-markdown-stream", "dk01-window-chrome"], codex: ["s03-markdown-stream"] };
 const labels = (spec, envProv) => resolveScenarios(spec, { packs, found: new Map(drivers.map((d) => [d, d])), drivers, envProv }).map(labelOf);
 
 test("default flavor is grok, ids unprefixed", () => {
@@ -27,6 +27,28 @@ test("codex-named packs and @codex suffix force codex regardless of env", () => 
 });
 test("unknown token is kept verbatim for FAIL reporting", () => {
   assert.deepEqual(labels("nope", "codex"), ["codex-nope"]);
+});
+
+test("env claude flips every token; labels get claude- prefix", () => {
+  assert.deepEqual(labels("desktop", "claude"), ["claude-s03-markdown-stream", "claude-dk01-window-chrome"]);
+});
+test("env all runs each driver three times: grok, codex, claude", () => {
+  assert.deepEqual(labels("s03", "all"), ["s03-markdown-stream", "codex-s03-markdown-stream", "claude-s03-markdown-stream"]);
+});
+test("claude-named packs and @claude suffix force claude regardless of env", () => {
+  assert.deepEqual(labels("desktop-claude", "grok"), ["claude-s03-markdown-stream", "claude-dk01-window-chrome"]);
+  assert.deepEqual(labels("s08@claude,dk01@grok", "codex"), ["claude-s08-approval-allow", "dk01-window-chrome"]);
+});
+test("expandProviders: lists, both, all, unknown falls back to grok", () => {
+  assert.deepEqual(expandProviders("claude+grok"), ["claude", "grok"]);
+  assert.deepEqual(expandProviders("both"), ["grok", "codex"]);
+  assert.deepEqual(expandProviders("ALL"), ["grok", "codex", "claude"]);
+  assert.deepEqual(expandProviders("nonsense"), ["grok"]);
+  assert.deepEqual(expandProviders(undefined), ["grok"]);
+});
+test("packs.json: desktop-claude mirrors the desktop pack", () => {
+  const real = JSON.parse(readFileSync(join(here, "../packs.json"), "utf8"));
+  assert.deepEqual(real["desktop-claude"], real.desktop);
 });
 
 function seed(provider) {
@@ -49,4 +71,17 @@ test("seed: grok default keeps codex disabled; both enables both", () => {
   const b = seed("both");
   assert.equal(b.providerInstances.grok.enabled, true);
   assert.equal(b.providerInstances.codex.enabled, true);
+});
+test("seed: MOCK_PROVIDER=claude enables claudeAgent (flavor env), disables grok+codex, text-gen on claudeAgent", () => {
+  const s = seed("claude");
+  assert.equal(s.providerInstances.claudeAgent.enabled, true);
+  assert.equal(s.providerInstances.grok.enabled, false);
+  assert.equal(s.providerInstances.codex.enabled, false);
+  assert.ok(s.providerInstances.claudeAgent.environment.some((e) => e.name === "MOCK_CLI_FLAVOR" && e.value === "claude"));
+  assert.equal(s.textGenerationModelSelection.instanceId, "claudeAgent");
+});
+test("seed: MOCK_PROVIDER=all enables grok, codex and claudeAgent", () => {
+  const s = seed("all");
+  for (const k of ["grok", "codex", "claudeAgent"]) assert.equal(s.providerInstances[k].enabled, true, k);
+  assert.equal(s.textGenerationModelSelection.instanceId, "grok");
 });

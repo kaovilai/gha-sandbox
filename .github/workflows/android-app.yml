@@ -17,9 +17,9 @@ on:
         type: boolean
         default: false
       mock_provider:
-        description: "Live mode only. Mock provider flavor: grok (ACP mock, default) | codex (Codex app-server mock: OpenAI icon, GPT-6-Astra) | both. See mockkit/README.md"
+        description: "Live mode only. Mock provider flavor: grok (ACP mock, default) | codex (Codex app-server mock: OpenAI icon, GPT-6-Astra) | claude (Claude stream-json mock: Claude icon, Claude Fable/Opus/Sonnet) | both (grok+codex) | all (grok+codex+claude). See mockkit/README.md"
         type: choice
-        options: [grok, codex, both]
+        options: [grok, codex, claude, both, all]
         default: grok
 
 permissions:

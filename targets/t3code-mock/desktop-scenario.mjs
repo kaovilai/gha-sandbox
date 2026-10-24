@@ -1,5 +1,5 @@
 // Runs mockkit UI drivers INSIDE the real t3code Electron window (built app, Xvfb), one isolated app per scenario.
-//   MOCK_PROVIDER = grok (default) | codex | both: provider flavor the drivers run against (see resolveIds).
+//   MOCK_PROVIDER = grok (default) | codex | claude | both (grok+codex) | all (grok+codex+claude): provider flavor the drivers run against (see resolveIds).
 //   SCENARIOS = comma list: driver ids, short prefixes ("s03", "dk02"), or pack names from mockkit/packs.json ("desktop", ...).
 // Web drivers (mockkit/scenarios-ui) are reused unchanged: Playwright attaches over CDP (connectOverCDP) to the Electron renderer.
 // Desktop-only drivers (mockkit/scenarios-desktop, ids dk*) additionally get `native` (xdotool + real-desktop shots).
@@ -29,7 +29,7 @@ const found = new Map(); // id -> file
 for (const d of dirs) for (const f of existsSync(d) ? readdirSync(d) : []) if (f.endsWith(".mjs")) found.set(f.slice(0, -4), join(d, f));
 const drivers = [...found.keys()].sort();
 const packs = JSON.parse(readFileSync(join(here, "../../mockkit/packs.json"), "utf8"));
-// Provider flavor per scenario (mockkit/lib/resolve.mjs): "@codex" suffix, a "codex" pack (codex, desktop-codex), or env MOCK_PROVIDER.
+// Provider flavor per scenario (mockkit/lib/resolve.mjs): "@codex"/"@claude" suffix, a "codex"/"claude" pack (codex, desktop-codex, claude, desktop-claude), or env MOCK_PROVIDER.
 const envProv = (process.env.MOCK_PROVIDER || "grok").toLowerCase();
 const resolveIds = (spec) => resolveScenarios(spec, { packs, found, drivers, envProv });
 const spec = (process.env.SCENARIOS || "").trim() || "desktop";

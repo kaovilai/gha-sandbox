@@ -19,9 +19,9 @@ on:
         description: "Mock only: ids, short prefixes (s03, dk02) or pack (desktop, see mockkit/packs.json). Default pack: desktop"
         default: ""
       mock_provider:
-        description: "Mock provider flavor: grok (ACP mock, default) | codex (Codex app-server mock: OpenAI icon, GPT-6-Astra) | both. See mockkit/README.md"
+        description: "Mock provider flavor: grok (ACP mock, default) | codex (Codex app-server mock: OpenAI icon, GPT-6-Astra) | claude (Claude stream-json mock: Claude icon, Claude Fable/Opus/Sonnet) | both (grok+codex) | all (grok+codex+claude). See mockkit/README.md"
         type: choice
-        options: [grok, codex, both]
+        options: [grok, codex, claude, both, all]
         default: grok
 
 permissions:

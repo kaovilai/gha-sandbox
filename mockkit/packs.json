@@ -28,6 +28,14 @@
     "dk02-settings",
     "dk03-command-palette"
   ],
+  "desktop-claude": [
+    "s03-markdown-stream",
+    "s08-approval-allow",
+    "s06-edit-file-diff",
+    "dk01-window-chrome",
+    "dk02-settings",
+    "dk03-command-palette"
+  ],
   "wide": [
     "s01-first-run-wizard",
     "s09-approval-deny",

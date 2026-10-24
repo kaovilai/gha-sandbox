@@ -9,9 +9,10 @@
 #      (`thread show --json`), screenshot + record each scenario.
 # Scenarios: s40 live streaming turn, s41 approval tap + resolve, s42 user-question card.
 # Env: LIVE_OUT (output dir, required), LIVE_SCENARIOS (default "s40 s41 s42"), MOCK_PACE,
-#   MOCK_PROVIDER = grok (default) | codex | both: provider flavor of the threads. grok: Grok mock (titles "Mock ...", provider grok /
-#   grok-build, files in $LIVE_OUT). codex: Codex app-server mock (titles "Codex ...", provider codex / gpt-6-astra, files in
-#   $LIVE_OUT/codex/). both: grok pass, then codex pass (same server, same app session).
+#   MOCK_PROVIDER = grok (default) | codex | claude | both | all: provider flavor of the threads. grok: Grok mock (titles "Mock ...",
+#   provider grok / grok-build, files in $LIVE_OUT). codex: Codex app-server mock (titles "Codex ...", provider codex / gpt-6-astra, files
+#   in $LIVE_OUT/codex/). claude: Claude stream-json mock (titles "Claude ...", provider claudeAgent / claude-fable-5-1, files in
+#   $LIVE_OUT/claude/, results claude-s4x). both: grok pass, then codex pass. all: grok, codex, then claude (same server, same app session).
 set -uo pipefail
 plat=${1:?android|ios}
 sroot=${2:?showcase root}
@@ -27,14 +28,20 @@ scenarios=${LIVE_SCENARIOS:-"s40 s41 s42"}
 live_root=$out
 case "$(echo "${MOCK_PROVIDER:-grok}" | tr 'A-Z' 'a-z')" in
   codex) mock_provider=codex; providers="codex" ;;
+  claude) mock_provider=claude; providers="claude" ;;
   both)  mock_provider=both;  providers="grok codex" ;;
+  all)   mock_provider=all;   providers="grok codex claude" ;;
   *)     mock_provider=grok;  providers="grok" ;;
 esac
 # per-pass flavor (set by use_provider): PROV/MODEL = server CLI --provider/--model, TP = thread title prefix
 PROV=grok MODEL=grok-build TP=Mock PROV_BAD=0
-use_provider() {
-  PROV=$1
-  if [ "$1" = codex ]; then MODEL=gpt-6-astra TP=Codex out="$live_root/codex"; else MODEL=grok-build TP=Mock out="$live_root"; fi
+use_provider() { # grok | codex | claude (the Claude provider instance id is claudeAgent)
+  PROV=$1; [ "$1" = claude ] && PROV=claudeAgent
+  case "$PROV" in
+    codex)       MODEL=gpt-6-astra TP=Codex out="$live_root/codex" ;;
+    claudeAgent) MODEL=claude-fable-5-1 TP=Claude out="$live_root/claude" ;;
+    *)           MODEL=grok-build TP=Mock out="$live_root" ;;
+  esac
   mkdir -p "$out/ui"
   navs=0
 }
@@ -242,7 +249,7 @@ remount_until() { # <title> <regex> <tag>
 
 results=()
 record_result() { results+=("$1=$2"); echo "LIVE RESULT $1 $2"; }
-rlabel() { [ "$PROV" = codex ] && echo "codex-$1" || echo "$1"; }
+rlabel() { case "$PROV" in codex) echo "codex-$1" ;; claudeAgent) echo "claude-$1" ;; *) echo "$1" ;; esac; }
 
 # ---- 1. seed the mock provider into the running showcase server ---------------------------------------------------
 log "base dir $bd"
@@ -250,7 +257,7 @@ ls "$bd/userdata" >&2
 chmod +x "$kit/bin/mock-cli.sh"
 MOCK_PROVIDER=$mock_provider node "$kit/seed/settings.mjs" "$bd/userdata" || { fail "seed failed"; exit 4; }
 t0=$SECONDS
-until grep -Eq ' (models|app-server)' "$MOCK_CONTROL_DIR/probes.log" 2>/dev/null; do
+until grep -Eq ' (models|app-server|--output-format)' "$MOCK_CONTROL_DIR/probes.log" 2>/dev/null; do
   (( SECONDS - t0 > 90 )) && { fail "T3 never probed the mock provider (probes.log empty)"; cat "$MOCK_CONTROL_DIR/probes.log" 2>&1; break; }
   sleep 2
 done
@@ -392,7 +399,7 @@ shot 00-before
 for P in $providers; do
   use_provider "$P"
   log "##### provider flavor: $P (out=$out)"
-  [ "$P" = codex ] && shot 00-before-codex
+  [ "$P" != grok ] && shot "00-before-$P"
   for s in $scenarios; do
     log "=== $s ($P) ==="
     PROV_BAD=0
