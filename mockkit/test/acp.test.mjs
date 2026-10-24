@@ -407,3 +407,27 @@ test("background-task (default): persistent Monitor frames, turn ends, then _x.a
   assert.match(text(c.frames), /Watch the dev server finished \(exit 0\)\. Last line: dev server listening/);
   c.close();
 });
+
+test("background-task kill=1: the wake turn also reaps the finished monitor with a completed KillTask call (T3 end signal)", async () => {
+  const c = client();
+  const sid = await session(c);
+  await c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:background-task kill=1]") });
+  const bg = c.frames.find((f) => f.method === "_x.ai/task_backgrounded");
+  const kill = await c.waitFor((f) => f.params?.update?.rawOutput?.type === "KillTask");
+  assert.equal(kill.params._meta.promptId, `task-completed-${bg.params.update.task_id}`);
+  assert.equal(kill.params.update.status, "completed");
+  assert.equal(kill.params.update.rawOutput.outcome, "already_exited");
+  assert.equal(kill.params.update.rawInput.variant, "KillTask");
+  assert.deepEqual(kill.params.update.rawInput.task_ids, [bg.params.update.task_id]);
+  await c.waitFor((f) => f.params?.update?.sessionUpdate === "turn_completed");
+  c.close();
+});
+
+test("background-task without kill: no KillTask frame (default unchanged)", async () => {
+  const c = client();
+  const sid = await session(c);
+  await c.request("session/prompt", { sessionId: sid, prompt: wrap("[mock:background-task]") });
+  await c.waitFor((f) => f.params?.update?.sessionUpdate === "turn_completed");
+  assert.equal(c.frames.some((f) => f.params?.update?.rawOutput?.type === "KillTask"), false);
+  c.close();
+});

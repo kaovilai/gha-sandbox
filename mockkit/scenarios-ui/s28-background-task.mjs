@@ -31,8 +31,10 @@ export default async function ({ page, shot, env }) {
   await expectText(page, /Watch the dev server finished \(exit 0\)\. Last line: dev server listening/, "wake-turn reply reporting the finished task", 40_000);
   await page.waitForTimeout(6000); // the wake run finishes; the banner is hidden while a run is active and may come back after it
   await shot("task-finished");
-  // The persistent monitor's own item is only closed by Stop (the mock sends no kill result), so the banner may still be up
-  // after the wake turn. Stop is the real user action for it: clicking it must clear the banner.
+  // The persistent monitor's own item is only closed by Stop: T3 ends a monitor item from `task_completed` only while the owning root turn is
+  // still open, and persistent monitors never hold it open (real Grok sends no completed status for the monitor either). Verified negative: the
+  // optional `kill=1` reap (KillTask/already_exited frame in the wake turn) does NOT clear the banner either (CI run 40045215237). Stop is the
+  // real user action for it: clicking it must clear the banner.
   const lingering = BANNER.test(await bodyText(page));
   console.log(`FINDING banner still shown after the wake turn: ${lingering}`);
   if (lingering) {

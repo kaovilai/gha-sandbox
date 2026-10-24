@@ -107,10 +107,19 @@ export async function bootDesktop({
     }
     // The backend (apps/server/dist/bin.mjs, run via electron-as-node) is spawned in its own process group, so it can outlive
     // a killed main process and keep the backend port (3773) taken: kill stragglers by command line. One app at a time.
-    for (const pat of ["apps/server/dist/bin.mjs", `--remote-debugging-port=${cdpPort}`, "node_modules/electron/dist/electron"]) {
+    for (const pat of ["apps/server/dist/bin.mjs", `--remote-debugging-port=${cdpPort}`, "node_modules/electron/dist/electron", "acp-mock-agent.ts", "mockkit/bin/t3-mock-"]) {
       spawnSync("pkill", ["-9", "-f", "--", pat], { stdio: "ignore" });
     }
-    await poll("CDP port free", async () => !(await fetch(`http://127.0.0.1:${cdpPort}/json/version`).then(() => true, () => false)), { timeout: 15_000, every: 300 }).catch((e) => console.log(`stop: ${e.message}`));
+    // whatever still LISTENS on the CDP port (a surviving child that inherited the socket) is killed too: the next app must be able to bind it
+    const ssOut = spawnSync("ss", ["-ltnp", `sport = :${cdpPort}`], { encoding: "utf8" }).stdout ?? "";
+    for (const m of ssOut.matchAll(/pid=(\d+)/g)) {
+      console.log(`stop: pid ${m[1]} still listens on ${cdpPort}: ${ssOut.trim().split("\n").at(-1)}`);
+      try {
+        process.kill(Number(m[1]), "SIGKILL");
+      } catch {}
+    }
+    // bounded probe: a dead app that still holds the port must not hang the poll for undici's 300 s default timeout
+    await poll("CDP port free", async () => !(await fetch(`http://127.0.0.1:${cdpPort}/json/version`, { signal: AbortSignal.timeout(2000) }).then(() => true, (e) => e?.name === "TimeoutError")), { timeout: 15_000, every: 300 }).catch((e) => console.log(`stop: ${e.message}`));
     await sleep(800);
   };
 
@@ -131,7 +140,7 @@ export async function bootDesktop({
       async () => {
         if (exited) throw new Error(`desktop boot: electron died early (${exited})\n${tailLog()}`);
         try {
-          const list = await (await fetch(`${cdpUrl}/json/list`)).json();
+          const list = await (await fetch(`${cdpUrl}/json/list`, { signal: AbortSignal.timeout(3000) })).json(); // bounded (see stop())
           cdpState = `targets: ${list.map((t) => `${t.type}:${t.url.slice(0, 80)}`).join(" | ")}`;
           return list.find((t) => t.type === "page" && /^(https?|t3code):\/\//.test(t.url) && !/devtools/i.test(t.url))?.url ?? null;
         } catch (e) {

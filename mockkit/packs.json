@@ -28,6 +28,30 @@
     "dk02-settings",
     "dk03-command-palette"
   ],
+  "desktop-wide": [
+    "s05-tool-read-search",
+    "s07-shell-command-output",
+    "s09-approval-deny",
+    "s10-user-question",
+    "s12-todo-entries",
+    "s13-error-turn",
+    "s14-usage-limit",
+    "s15-interrupt-cancel",
+    "s17-multi-turn-context",
+    "s35-terminal"
+  ],
+  "desktop-wide-codex": [
+    "s05-tool-read-search",
+    "s07-shell-command-output",
+    "s09-approval-deny",
+    "s10-user-question",
+    "s12-todo-entries",
+    "s13-error-turn",
+    "s14-usage-limit",
+    "s15-interrupt-cancel",
+    "s17-multi-turn-context",
+    "s35-terminal"
+  ],
   "wide": [
     "s01-first-run-wizard",
     "s09-approval-deny",
@@ -42,6 +66,7 @@
     "s31-sidebar-thread-actions",
     "s33-command-palette-tour",
     "s34-settings-tour",
+    "s35-terminal",
     "s37-files-browser"
   ],
   "smoke": [

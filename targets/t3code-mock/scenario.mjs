@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { run } from "../../lib.mjs";
 import { bootT3 } from "../../mockkit/lib/boot.mjs";
-import { buildMaskRules, installMaskContext, maskNow } from "../../mockkit/lib/mask.mjs";
+import { buildMaskRules, installMaskContext, maskGuard } from "../../mockkit/lib/mask.mjs";
 import { assertShell, dumpPage, skipOnboarding } from "../../mockkit/lib/ui.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -109,6 +109,7 @@ for (const entry of ids) {
     const env = { ...process.env, MOCKKIT_PROVIDER: entry.prov, MOCKKIT_WS: srv.ws, MOCKKIT_STATE: srv.state, MOCKKIT_ROOT: srv.root, MOCK_CONTROL_DIR: srv.ctl, MOCK_LOG: srv.mockLog };
     // runner hostname + absolute runner/workspace paths are masked in the DOM (screenshots AND video), see mockkit/lib/mask.mjs
     const maskRules = buildMaskRules({ ws: srv.ws, root: srv.root });
+    const guard = maskGuard(maskRules); // every screenshot is leak-checked (light DOM + shadow DOM + inputs); a leak FAILS the scenario
     await run(
       async ({ page, shot }) => {
         const sshot = (name, opts) => shot(`${id}-${name}`, opts);
@@ -119,6 +120,7 @@ for (const entry of ids) {
           await dumpPage(page, `${id} failure`).catch(() => {});
           throw e;
         }
+        guard.assertClean(id);
       },
       {
         viewport: mod.meta?.viewport ?? { width: 1440, height: 900 },
@@ -126,7 +128,7 @@ for (const entry of ids) {
           if (!mod.meta?.firstRun) await skipOnboarding(context);
           await installMaskContext(context, maskRules);
         },
-        beforeShot: (page) => maskNow(page, maskRules),
+        beforeShot: guard.beforeShot,
         storageState: stateFile,
       },
     );

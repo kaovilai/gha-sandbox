@@ -245,3 +245,13 @@ export async function expectLocatorText(page, loc, re, what, timeout = 20_000) {
   await dumpPage(page, `ASSERT FAILED: ${what}`).catch(() => {});
   throw new Error(`assertion failed: expected ${what} (element text did not match ${re})`);
 }
+
+// Structural negative: no element matches (locators pierce open shadow DOM, unlike body.innerText). Used to prove masked text is the ONLY text shown.
+export async function expectNoLocator(page, loc, what) {
+  const n = await loc.count();
+  if (n > 0) {
+    const sample = await loc.first().innerText({ timeout: 2000 }).catch(() => "");
+    await dumpPage(page, `ASSERT FAILED (unexpected element): ${what}`).catch(() => {});
+    throw new Error(`assertion failed: ${what} (${n} match(es), first: ${JSON.stringify(sample.slice(0, 120))})`);
+  }
+}

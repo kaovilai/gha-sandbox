@@ -200,6 +200,24 @@ export function serveAcp({ input = process.stdin, output = process.stdout, env =
           title: `${shown} (${t.taskId.slice(0, 8)})`,
           rawOutput: { type: "TaskOutput", Result: { task_id: t.taskId, command: shown, status: "completed", exit_code: t.exitCode, output: t.output, truncated: false, raw_output_bytes: Buffer.byteLength(t.output ?? "") } },
         });
+        // Optional (`kill`): the agent also reaps the finished task with kill_command_or_subagent (rawOutput KillTask, outcome already_exited).
+        // T3 treats a completed kill call as the genuine end signal for the task id it names (xaiAcpExtension.extractXAiKilledBackgroundTasks).
+        if (t.kill) {
+          const killId = `mock-kill-${++nextTool}`;
+          const killMeta = { "x.ai/tool": { version: 1, name: "kill_command_or_subagent", kind: "background_task_action", namespace: "grok_build", label: "Background Task", read_only: false } };
+          wake({ sessionUpdate: "tool_call", toolCallId: killId, title: "kill_command_or_subagent", rawInput: { task_ids: [t.taskId] }, _meta: killMeta });
+          wake({
+            sessionUpdate: "tool_call_update",
+            toolCallId: killId,
+            kind: "other",
+            status: "completed",
+            title: `kill ${t.taskId} (already_exited)`,
+            locations: [],
+            rawInput: { task_ids: [t.taskId], task_id: t.taskId, variant: "KillTask" },
+            rawOutput: { type: "KillTask", outcome: "already_exited" },
+            _meta: killMeta,
+          });
+        }
         const last = String(t.output ?? "").trim().split("\n").at(-1) ?? "";
         wake({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: `${t.description} finished (exit ${t.exitCode}). Last line: ${last}` } });
         xUpdate(s.id, { sessionUpdate: "turn_completed", prompt_id: promptId, stop_reason: "end_turn" });

@@ -1,7 +1,7 @@
 // node --test mockkit/test : runner hostname / absolute path masking rules (pure string side; the in-page script uses the same rules).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyMask, buildMaskRules, MASK_HOME, MASK_HOST } from "../lib/mask.mjs";
+import { applyMask, applyMaskPadded, buildMaskRules, MASK_HOME, MASK_HOST } from "../lib/mask.mjs";
 
 const ws = "/home/runner/work/_temp/mockkit-run/s37-files-browser/ws/demo-app";
 const root = "/home/runner/work/_temp/mockkit-run/s37-files-browser";
@@ -31,6 +31,19 @@ test("no rule can leave its own match behind (idempotent)", () => {
   const once = applyMask(`${ws}/a runnervm8k3b6 /home/runner/x`, rules);
   assert.equal(applyMask(once, rules), once);
   for (const [src, flags] of rules) assert.equal(new RegExp(src, flags).test(once), false, `rule ${src} matches masked output`);
+});
+
+test("~-relative spellings (shell prompt \\w) are masked too", () => {
+  assert.equal(applyMask("runner@runnervm8k3b6:~/work/_temp/mockkit-run/s37-files-browser/ws/demo-app$", rules), "runner@sandbox-vm:~/demo-app$");
+  assert.equal(applyMask("~/work/_temp/other", rules), "/tmp/other");
+  assert.equal(applyMask("~/work/gha-sandbox/target", rules), "~/gha-sandbox/target");
+});
+
+test("padded canvas variant keeps the string length (monospace grid stays aligned)", () => {
+  const s = `runner@runnervm8k3b6:${ws}$ `;
+  const out = applyMaskPadded(s, rules);
+  assert.equal(out.length, s.length);
+  assert.match(out, /^runner@sandbox-vm:\/home\/dev\/demo-app\$ +$/);
 });
 
 test("localhost-like or tiny hostnames never produce a catch-all rule", () => {
