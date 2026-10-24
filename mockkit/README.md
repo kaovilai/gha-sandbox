@@ -449,3 +449,8 @@ Residual evidence weaknesses from round 1, and what each fix proves (CI runs: se
   context is finalized), and persistent monitors are exempt from holding the turn open. So for a persistent monitor that ends after its turn, the lingering "Running: ..." banner is T3 behaviour and the real remedy is the user's Stop (what the driver does).
   The mock can additionally reap the task with `kill_command_or_subagent` (`bgTask kill:true`, queue arg `kill=1`, a completed `KillTask`/`already_exited` frame that T3 documents as an end signal). Tried in CI (run 40045215237): the banner STILL lingers (the kill lands in the wake run's context, which does not own the monitor item), so s28 does not use it; the Stop click stays and is asserted. Conclusion: not a mock gap; a T3 limitation for persistent monitors that end after their turn.
 
+CI (branch `track2-tighten`, all green, PNGs read): `scenarios=wide` 40066961971 (15/15 incl. s35 terminal + s37 masked tree/code view/diff panel), `web` 40045233586, `codex` 40045234981, `claude` 40045236449 (these three ran on the
+commit that introduced the mask/leak-guard; later commits only touched s28/s37/desktop.mjs/docs), `desktop-wide` 40053913937 (grok, 10/10), `desktop-wide-codex` 40066963099 (10/10). Zero `MASK-LEAK` lines in every log.
+What the shots show: terminal canvas `runner@sandbox-vm  :~/demo-app` + `cwd=/home/dev/demo-app host=sandbox-vm` (web and Electron), file tree row `sandbox-vm.log`, code view `cwd=/home/dev/demo-app`, diff added line
+`changed: /home/dev/demo-app/docs on sandbox-vm`. Cosmetic: the canvas padding keeps the grid aligned, so a shortened prompt leaves a visible gap before the `$`.
+
