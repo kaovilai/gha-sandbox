@@ -1,6 +1,6 @@
 // DK02 settings via the NATIVE application menu accelerator (CmdOrCtrl+, -> main process -> menu-action IPC -> renderer route).
 // Desktop-only: the web build has no application menu. shot = real desktop capture.
-import { startSession } from "../lib/ui.mjs";
+import { providerOf, startSession } from "../lib/ui.mjs";
 
 export default async function ({ page, shot, env, native }) {
   await startSession(page, env);
@@ -22,5 +22,16 @@ export default async function ({ page, shot, env, native }) {
     await shot(name);
   };
   await nav(/^Providers$/, "settings-providers");
+  // Claude/Codex runs: also show the detail pane of the running provider (the list opens on the first row, Codex) + its status line
+  const prov = providerOf(env);
+  if (prov !== "grok") {
+    const name = prov === "claude" ? "Claude" : "Codex";
+    const sel = page.getByRole("button", { name: new RegExp(`^Select ${name}$`) }).first();
+    if (await sel.click({ timeout: 5000 }).then(() => true, () => false)) {
+      await native.sleep(1200);
+      console.log(`FINDING providers detail pane selected: ${name}; Authenticated visible: ${await page.getByText(/Authenticated/).first().isVisible().catch(() => false)}`);
+      await shot(`settings-providers-${prov}`);
+    } else console.log(`FINDING no \`Select ${name}\` button on the Providers page`);
+  }
   await nav(/^Keybindings$/, "settings-keybindings");
 }

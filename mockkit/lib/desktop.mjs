@@ -160,10 +160,10 @@ export async function bootDesktop({
     placeWindow(win, size.w, size.h);
 
     await poll(
-      "T3 probed the mock provider (probes.log has `models` or `app-server`)",
+      "T3 probed the mock provider (probes.log has `models`, `app-server` or claude's `--output-format`)",
       () => {
         try {
-          return /\s(models|app-server)\b/.test(readFileSync(join(ctl, "probes.log"), "utf8"));
+          return /\s(models|app-server|--output-format)\b/.test(readFileSync(join(ctl, "probes.log"), "utf8"));
         } catch {
           return false;
         }

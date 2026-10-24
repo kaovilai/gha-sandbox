@@ -28,7 +28,8 @@ import { loadScenarios } from "../scenarios/index.mjs";
 export const CLAUDE_VERSION = "2.1.300";
 export const MOCK_ACCOUNT = { email: "mock@example.invalid", organization: "Mock Org", subscriptionType: "max", tokenSource: "claude.ai", apiKeySource: "none", apiProvider: "firstParty" };
 const CONTEXT_WINDOW = 200000;
-const IDLE_CLOSE_MS = 350;
+// Must exceed the 450 ms chunk pacing of the live-stream scenario (S40): else every 2-word chunk closes its own text block (own T3 message).
+const IDLE_CLOSE_MS = Number(process.env.MOCK_CLAUDE_IDLE_MS) || 800;
 const DEFAULT_MODEL = "claude-sonnet-5-5";
 
 // `models` of the initialize response (T3 takes its picker list from its own manifest, this is for protocol completeness).

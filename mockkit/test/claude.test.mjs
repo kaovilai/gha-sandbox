@@ -439,6 +439,22 @@ test("held turn: hold gate released from outside resumes the scenario", async ()
   c.close();
 });
 
+test("live-stream (real pace, held mid-turn): steps 1-5 are ONE text block (one message), closed by the idle timer while held", async () => {
+  const c = client({ env: { MOCK_PACE: "real", MOCK_HOLD_TIMEOUT_MS: "20000" } });
+  await c.control({ subtype: "initialize" });
+  c.user("[mock:live-stream hold=h5] go");
+  await c.waitFor(() => existsSync(join(c.cwd, ".ctl/reached/h5")));
+  await c.waitFor((f) => f.type === "assistant" && f.message.content.some((b) => b.type === "text" && /Step 5 of 8/.test(b.text)));
+  const held = blocks(c.frames, "text");
+  assert.equal(held.length, 1, `expected one block, got ${held.map((b) => JSON.stringify(b.text)).join(" | ")}`);
+  assert.match(held[0].text, /Step 1 of 8[\s\S]*Step 5 of 8/);
+  assert.doesNotMatch(held[0].text, /Step 6 of 8/);
+  mkdirSync(join(c.cwd, ".ctl/release"), { recursive: true });
+  writeFileSync(join(c.cwd, ".ctl/release/h5"), "1");
+  assert.match((await c.result(1)).result, /Live stream complete/);
+  c.close();
+});
+
 test("resume: --session-id is reported in init; --resume=<id> after a respawn keeps the turn counter + history", async () => {
   const cwd = workspace();
   const ctl = { MOCK_CONTROL_DIR: join(cwd, ".ctl") };
