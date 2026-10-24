@@ -19,7 +19,7 @@ export default async function ({ page, shot, env }) {
   await input.setInputFiles(attach);
   await page.waitForTimeout(1500);
   await shot("attached");
-  await finding("attachment chip / thumbnail in the composer", async () => `img=${await page.locator('img[alt="attached-photo.png"]').first().isVisible().catch(() => false)}`);
+  if (!(await page.locator(`img[alt="attached-photo.png"]`).first().isVisible().catch(() => false))) throw new Error("assertion failed: attachment thumbnail not shown in the composer");
   nextScenario(env, "image-input");
   const ed = composerEditor(page);
   await ed.click();
@@ -41,6 +41,7 @@ export default async function ({ page, shot, env }) {
   await expandRows(page, { type: "dynamic" });
   await page.waitForTimeout(1500);
   const b = await dumpPage(page, "s68 read image");
-  await finding("Read row with an image preview", async () => `readRow=${/logo\.png/.test(b.text)} imgs=${await page.locator('img[src*="logo.png"], img[alt*="logo"]').count()} totalImgs=${await page.locator("img").count()}`);
+  if ((await page.locator(`img[src*="logo.png"], img[alt*="logo"]`).count()) < 1) throw new Error("assertion failed: Read of logo.png shows no image preview row");
+  await expectBody(page, /Read [^\n]*logo\.png/, "Read row for logo.png", 10_000);
   await shot("read-image-row");
 }

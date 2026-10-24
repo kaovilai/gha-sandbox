@@ -11,18 +11,18 @@ export default async function ({ page, shot, env }) {
   await waitReached("retry70", 60_000, env);
   await page.waitForTimeout(2500);
   const retrying = await dumpPage(page, "s70 retrying");
-  await finding("retry row while retrying", () => `reconnecting=${/Reconnecting|Retrying|retry/i.test(retrying.text)} attempt=${JSON.stringify(retrying.text.match(/[^\n]*(attempt|2\/5|2 of 5|Retrying|Reconnecting)[^\n]*/i)?.[0] ?? null)} apiError=${/Claude API server error/.test(retrying.text)}`);
+  await expectBody(page, /Retrying provider \(2\/5\)/, "api_retry frame renders a retry row with the attempt counter", 10_000);
   await shot("retrying");
   release("retry70", env);
   await expectText(page, /Connection restored\. Here is the answer after two retries\./, "answer after the retries", 60_000);
   await page.waitForTimeout(2000);
   await shot("recovered");
-  await finding("retry row cleared after output resumed", async () => !/Reconnecting|Retrying/i.test(await bodyText(page)));
+  if (/Reconnecting|Retrying provider/i.test(await bodyText(page))) throw new Error("assertion failed: retry row still shown after output resumed");
   await ask(page, env, "notice", "Continue please.");
   await expectText(page, /Continuing with the fallback model\./, "assistant line after the notice", 60_000);
   await page.waitForTimeout(1500);
   const n = await dumpPage(page, "s70 notice");
-  await finding("system notice row", () => `notice=${/Heads up: this mock session is running on a fallback model\./.test(n.text)}`);
+  await expectBody(page, /Heads up: this mock session is running on a fallback model\./, "T3 renders the informational system notice text", 10_000);
   await expectBody(page, /fallback model/, "notice or reply mentioning the fallback model", 10_000);
   await shot("notice");
 }

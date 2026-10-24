@@ -26,10 +26,14 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(1500);
   await shot("skill-menu");
   const menu = await dumpPage(page, "s65 $ menu");
-  await finding("skills listed in the $ menu", () => `releaseNotes=${/release-notes/.test(menu.text)} summarizeRepo=${/summarize-repo/.test(menu.text)} desc=${/Draft release notes/.test(menu.text)}`);
+  await finding("skills listed in the $ menu (unfiltered; machine-local personal skills may fill the first rows)", () => `releaseNotes=${/Release Notes/.test(menu.text)} summarizeRepo=${/Summarize Repo/.test(menu.text)}`);
   await ed.pressSequentially("release", { delay: 40 });
   await page.waitForTimeout(800);
   await shot("skill-menu-filtered");
+  // observed: T3 title-cases the skill name ("Release Notes"), shows the SKILL.md description and a "Project Skill" badge
+  await expectBody(page, /Release Notes/, "workspace skill listed in the $ picker (title-cased name)", 10_000);
+  await expectBody(page, /Draft release notes from the/, "SKILL.md description shown in the $ picker", 10_000);
+  await expectBody(page, /Project Skill/, "skill from <workspace>/.claude/skills is badged 'Project Skill'", 10_000);
   let usedPicker = false;
   try {
     await page.keyboard.press("Enter"); // select the highlighted skill -> chip
@@ -46,7 +50,7 @@ export default async function ({ page, shot, env }) {
     console.log("FINDING: picker flow did not execute the skill; falling back to the literal /release-notes text");
     await dumpPage(page, "s65 after picker flow");
     await ed.click();
-    await page.keyboard.press("Control+A");
+    await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.press("Delete");
     await ed.pressSequentially("/release-notes for version 1.2", { delay: 20 });
     await page.keyboard.press("Escape");
@@ -56,6 +60,9 @@ export default async function ({ page, shot, env }) {
   await expectBody(page, /release-notes skill finished: Draft release notes from the git log/, "closing answer of the executed skill (description read from SKILL.md)", 60_000);
   await page.waitForTimeout(1500);
   console.log(`FINDING skill invoked via the $ picker chip: ${usedPicker}`);
+  // observed: the picker flow works (user bubble shows a "Release Notes" chip + "for version 1.2"); the literal-text fallback must not mask a broken picker
+  if (!usedPicker) throw new Error("assertion failed: the $ picker flow did not execute the skill (only the literal /release-notes fallback did)");
+  await expectBody(page, /Release Notes[\s\S]{0,40}for version 1\.2/, "user message carries the skill chip + args", 10_000);
   await shot("skill-done");
   await expandWork(page);
   await expandRows(page, { type: "dynamic" });

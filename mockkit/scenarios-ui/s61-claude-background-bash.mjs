@@ -30,11 +30,18 @@ export default async function ({ page, shot, env }) {
   await ask(page, env, "background-bash", "Start the watcher, check its output, then stop it.", { mode: "stop" });
   await expectText(page, /The watcher was stopped\./, "closing sentence after TaskStop", 60_000);
   await page.waitForTimeout(2000);
-  await expandWork(page);
+  // the first turn's work log is already open; open the LAST "Worked for" row (clicking an open one would collapse it)
+  await page.getByText(/^Worked for/).last().click().catch(() => {});
+  await page.waitForTimeout(1000);
   await expandRows(page, { type: "dynamic" });
+  await expandRows(page, { type: "command" });
   await page.waitForTimeout(800);
+  await shot("task-stop-work-log");
   const stopped = await dumpPage(page, "s61 stop phase");
-  await finding("TaskOutput / TaskStop rows", () => `taskOutput=${/TaskOutput|Task output/i.test(stopped.text)} taskStop=${/TaskStop|Task stop|Stop task/i.test(stopped.text)} watcherLine=${/watcher started/.test(stopped.text)}`);
-  await finding("banner gone after TaskStop", () => !/Running: [^\n]*file watcher/.test(stopped.text));
+  // observed: TaskOutput folds into the "Ran 1 command and used 1 tool" group; TaskStop is its own row with the tool result JSON
+  await expectBody(page, /TaskStop/, "TaskStop tool row", 10_000);
+  await expectBody(page, /Successfully stopped task/, "TaskStop result (the mock really killed the process)", 10_000);
+  await finding("TaskOutput row (folded into a tool group)", () => `taskOutput=${/TaskOutput|Task output/i.test(stopped.text)} watcherLine=${/watcher started/.test(stopped.text)}`);
+  if ((await page.getByRole("button", { name: /^Stop$/ }).count()) > 0) throw new Error("assertion failed: Stop banner still visible after TaskStop");
   await shot("task-stopped");
 }

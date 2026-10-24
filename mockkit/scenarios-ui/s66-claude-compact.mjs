@@ -29,7 +29,7 @@ export default async function ({ page, shot, env }) {
   await waitReached("cmp66", 60_000, env);
   await page.waitForTimeout(2500);
   const running = await dumpPage(page, "s66 compacting");
-  await finding("compaction running row", () => `compacting=${/Compacting context|Compacting/i.test(running.text)}`);
+  await expectBody(page, /Compacting context/i, "pinned running row while the CLI reports status compacting", 10_000);
   await shot("compacting");
   release("cmp66", env);
   await expectBody(page, /Context compacted/i, "'Context compacted' row after compact_boundary", 60_000);
@@ -38,7 +38,8 @@ export default async function ({ page, shot, env }) {
   await expandRows(page, { type: "compaction" });
   await page.waitForTimeout(800);
   const done = await dumpPage(page, "s66 compacted");
-  await finding("compaction row details (before/after tokens)", () => `before=${/24[.,]?0*k?|24,000|24000/.test(done.text)} after=${/1[.,]192|1\.2k|1192/.test(done.text)} text=${JSON.stringify(done.text.match(/Context compacted[^\n]{0,80}/)?.[0] ?? null)}`);
+  // observed (T3 e01c399): a divider row "Context compacted 24K -> 1.19K tokens" built from compact_metadata pre/post_tokens
+  await expectBody(page, /Context compacted\s*24K[\s→>-]*1\.19K tokens/, "compaction divider shows the before/after token counts from compact_boundary", 10_000);
   await shot("compacted");
   await finding("context meter after compaction", async () => JSON.stringify((await bodyText(page)).match(/\d+(\.\d+)?k?\s*\/\s*\d+k?|\d+%[^\n]{0,30}/)?.[0] ?? null));
   // the thread keeps working and counts from the compacted context
@@ -53,6 +54,6 @@ export default async function ({ page, shot, env }) {
   await expandWork(page);
   await expandRows(page, { type: "compaction" });
   const auto = await dumpPage(page, "s66 auto compaction");
-  await finding("auto-compaction row (168k -> 4.2k)", () => `compactedRows=${(auto.text.match(/Context compacted/g) ?? []).length} 168=${/168k|168,000|168000/.test(auto.text)} 4_2=${/4\.2k|4,200|4200/.test(auto.text)}`);
+  await expectBody(page, /Context compacted\s*168K[\s→>-]*4\.20K tokens/, "mid-turn auto-compaction divider (trigger auto, 168K -> 4.20K)", 10_000);
   await shot("auto-compacted");
 }

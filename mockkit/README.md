@@ -385,7 +385,20 @@ New pack `claude-extra` (`scenarios=claude-extra`, drivers s60-s71, runs named `
 
 Not built (honest): background *subagents* (`run_in_background` Agent + `SendMessage` resume), nested subagents, subagent permission prompts, `claude_ai_*` connector tool names, `forkSession` / thread fork
 (T3 reads the CLI's own transcript JSONL from disk, which the mock does not write), `/context` / `/cost` local-command output, file checkpointing (`rewindFiles`), `ToolSearch`, MCP elicitation for Claude.
-T3 side: its Claude adapter has no handler for `hook_*` frames (not rendered) and MCP server status is not shown anywhere in the UI; the drivers record what is actually rendered as `FINDING` lines.
+T3 side: its Claude adapter has no handler for `hook_*` frames (not rendered) and MCP server status is not shown anywhere in the UI.
+
+Observed T3 rendering (adversarial review, pack `claude-extra` run LOCALLY on macOS against t3code `3f3a1bf4` with a `xvfb-run` shim, PNGs read; the GitHub Actions queue was stalled for hours so no CI run existed yet).
+The drivers now hard-assert these (they were `FINDING` lines before review):
+
+* **s60** running child = row `explorer Running / Running Read src/greeting.ts` + Lineage panel "1 running"; finished = `2 subagents / 2 done` summary row (expand: `explorer`, `builder` + their `task_notification` summaries), Lineage "Previous agents (2)", child thread page "Subagent of <parent>" with the child's own Read + text.
+* **s61** composer banner `Running: Run the build` + Stop while the roster has the task, cleared after `task_notification`; wake turn text and a `Command "Run the build" finished` row; `TaskStop` is its own row with the result JSON, `TaskOutput` folds into a "Ran 1 command and used 1 tool" group.
+* **s62** persistent Monitor banner is `<description>` + Stop (no `Running:` prefix), `Monitor ... finished` after the notification.
+* **s64** group row "Used Linear and Docs integrations", child rows titled by `tool_use_meta.display_name` ("List issues", "Search docs"); raw `mcp__` names never shown.
+* **s65** `$` picker lists workspace skills title-cased ("Release Notes" + description + "Project Skill" badge); the chosen skill is a chip in the user bubble and the CLI gets `/release-notes for version 1.2`.
+* **s66** `Compacting context` row, divider `Context compacted 24K -> 1.19K tokens`, mid-turn auto divider `168K -> 4.20K tokens`, later turns count from the compacted history.
+* **s67** "Edit from here" respawns the CLI with `--resume-session-at`; next answer is "turn 3" again and quotes turn 2.
+* **s68** attachment thumbnail in composer and user bubble, `Read` of a PNG shows an inline image. **s69** group "Searched the web 2 times", expanded rows show query, result links and the WebFetch result JSON (T3 prints the raw JSON). **s70** `Retrying provider (2/5)` row and the informational notice text. **s71** `Pursuing goal` banner.
+* Local-run caveats (not CI): a Mac with personal skills lists them above the project skill in the `$` picker; macOS needs `ControlOrMeta+A` (fixed); `/private` shows up in paths because `/tmp` is a symlink there. Packs `claude` on the same local setup: s18/s20/s22 fail identically on `origin/main` (local Mac/T3 drift, not a branch regression), other 17 ok.
 
 ## Known limits
 

@@ -1,7 +1,7 @@
 // S71 /goal (Claude): Claude reports a goal only through the transcript (synthetic assistant lines "Goal set: X" / "Goal active: X (N turns)" /
 // "Goal cleared: X", plus "Stop hook feedback" user frames); T3 (ClaudeAdapterV2.nextClaudeGoal) turns them into the thread goal. The turn is
 // held so the active state can be captured; the scenario then completes the goal ("Goal cleared"). What T3 renders for it is recorded as FINDING lines.
-import { composerEditor, dumpPage, expectText, nextScenario, providerOf, sendPrompt, startSession } from "../lib/ui.mjs";
+import { composerEditor, dumpPage, expectBody, expectText, nextScenario, providerOf, sendPrompt, startSession } from "../lib/ui.mjs";
 import { finding } from "../lib/ui-extra.mjs";
 import { release, waitReached } from "../ctl/mockctl.mjs";
 
@@ -20,12 +20,14 @@ export default async function ({ page, shot, env }) {
   await waitReached("goal71", 60_000, env);
   await page.waitForTimeout(2500);
   const active = await dumpPage(page, "s71 goal active");
-  await finding("goal banner while active", () => `pursuing=${/Pursuing goal/.test(active.text)} goalSet=${/Goal set/.test(active.text)} objective=${/friendlier/.test(active.text)}`);
+  await expectBody(page, /Pursuing goal/, "goal banner while the goal is active", 10_000);
+  await expectBody(page, /Make the greeting helper friendlier/, "goal objective shown", 10_000);
   await shot("goal-active");
   release("goal71", env);
   await expectText(page, /the goal is met/, "turn answer after the goal work", 60_000);
   await page.waitForTimeout(2500);
   const done = await dumpPage(page, "s71 goal done");
-  await finding("goal banner after 'Goal cleared'", () => `pursuing=${/Pursuing goal/.test(done.text)} complete=${/Goal complete/.test(done.text)} cleared=${/Goal cleared/.test(done.text)}`);
+  if (/Pursuing goal/.test(done.text)) throw new Error("assertion failed: goal banner still shown after the goal was cleared");
+  await finding("goal cleared / complete rows", () => `complete=${/Goal complete/.test(done.text)} cleared=${/Goal cleared/.test(done.text)}`);
   await shot("goal-done");
 }

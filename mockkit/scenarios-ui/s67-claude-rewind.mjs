@@ -32,7 +32,7 @@ export default async function ({ page, shot, env }) {
   await finding("timeline after revert", () => `turn3Gone=${!/Mock agent, turn 3/.test(after.text)} turn2Kept=${/Mock agent, turn 2/.test(after.text)}`);
   // continue: the reverted prompt was put back into the composer; clear it first
   await composerEditor(page).click();
-  await page.keyboard.press("Control+A");
+  await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.press("Delete");
   await sendPrompt(page, "Fresh message after the revert.");
   await expectBody(page, /Mock agent, turn 3\. You said: "Fresh message after the revert\."/, "turn counter continues from the kept turn (turn 3 again), i.e. the CLI honoured --resume-session-at", 60_000);
