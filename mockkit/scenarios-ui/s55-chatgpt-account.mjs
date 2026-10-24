@@ -1,5 +1,5 @@
 // S55 chatgpt-account (Codex): MOCK_CODEX_ACCOUNT=chatgpt (+ MOCK_CODEX_PLAN=pro, one reset credit). account/read returns a
-// ChatGPT subscription account, so Settings > Providers shows "ChatGPT Pro 20x Subscription" + the account email, and
+// ChatGPT subscription account, so Settings > Providers shows "ChatGPT Pro 200 Subscription" + the account email, and
 // account/rateLimits/read feeds the usage windows (5h / weekly) and reset credits: shown by the composer's `/usage-limits` command.
 // Codex only (the Grok flavor has no ChatGPT account).
 import { bodyText, composerEditor, expectBody, dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
