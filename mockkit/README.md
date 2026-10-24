@@ -373,6 +373,16 @@ Codex sends the goal's first turn before `thread/goal/set active`: a scenario th
   server and app. `server_truth` checks `thread.providerInstanceId == claudeAgent` (mismatch fails the scenario). Claude approval card buttons come from the server (`Approve` / `Decline`, the
   driver taps `^(Approve|Allow once)$`). T3 renders Claude text per finished block, so the S40 held state shows the closed blocks (Step 1..5), same as Grok/Codex for the assertions.
 
+* **Verified (branch track2-claude-everywhere).** Desktop `-f scenarios=desktop -f mock_provider=claude` run 40044239381 (6/6; PNGs: Claude starburst icon in the sidebar row and composer, model "Claude Fable 5.1",
+  Settings > Providers "Claude v2.1.300 Authenticated - Claude Max Subscription" with Codex/Grok Disabled, approval card "Claude wants to create ..." with Decline/Approve); `-f mock_provider=all -f scenarios=dk02`
+  run 40051146810 (Grok, Codex and Claude each booted; `settings-providers-claude.png` = Claude detail pane, "Authenticated as ... Claude Max Subscription"). Android live `-f mock_provider=claude` run 40063624943
+  (`claude-s40/s41/s42=ok`, PNGs read: Steps 1-5 held with Claude icon, Steps 6-8 + "Live stream complete.", approval card "Allow once / Allow session / Decline", question answered). iOS live: run 40046420449
+  (S41/S42 ok, PNGs read) and run 40053047787 (S40 ok, held + complete PNGs read; its S41/S42 failed on the known "This connection cannot respond" session-scope flake after 4 remounts, an infra timeout, not a Claude defect).
+* **Claude-specific harness notes.** (1) The Claude mock closes an idle text block after 800 ms (was 350): the S40 stream paces 450 ms between chunks, and at 350 ms every 2-word chunk became its own T3 message
+  ("into the " / "entry point"), so `Step 5 of 8` never matched server text (runs 40044253835, 40046420449). (2) A running Claude thread shows an animated "Thinking" row + "Working Ns" pill, so Android
+  uiautomator can return an EMPTY tree for the held state (run 40049775691, screenshot still showed Steps 1-5); `mobile-live.sh` then accepts the held screenshot + server truth for the Claude pass only when the tree
+  has 0 nodes (a tree without the text still fails), the completed state still requires the UI tree. (3) Claude's approve button is `Approve`/`Allow once`; both accepted by the driver regex.
+
 ## Known limits
 
 * ACP (grok), Codex (`app-server`) and Claude (`stream-json`) flavors are implemented. pi / opencode adapters are not built (see "Codex adapter" / "Claude adapter" for their limits).
