@@ -122,6 +122,20 @@
     "s03-markdown-stream",
     "s17-multi-turn-context"
   ],
+  "claude-extra": [
+    "s60-claude-subagents",
+    "s61-claude-background-bash",
+    "s62-claude-monitor",
+    "s63-claude-hooks",
+    "s64-claude-mcp-tools",
+    "s65-claude-skills",
+    "s66-claude-compact",
+    "s67-claude-rewind",
+    "s68-claude-images",
+    "s69-claude-web",
+    "s70-claude-retry-notice",
+    "s71-claude-goal"
+  ],
   "codex-extra": [
     "s50-mcp-elicitation",
     "s51-permission-request",

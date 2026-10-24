@@ -296,8 +296,8 @@ Protocol recon: `@anthropic-ai/claude-agent-sdk` 0.3.276 (`sdk.mjs` / `sdk.d.ts`
 * **Text generation.** `-p ... --json-schema S`: JSON for the schema's `properties` keys (shared `lib/textgen.mjs`; titles from the scenario, commit subject "Update files via mock agent", S24).
 * **Limits (honest).** T3 renders assistant text only from the completed `assistant` snapshot (it ignores `text_delta`), so Claude text appears per finished block, not word by word: the mock closes a
   text block after 350 ms without a delta so held/paused turns still show their text, and a long single `say` (S03) shows up whole. Thinking and tool rows do stream live. Model names, version and the
-  context window ("190k/1m") come from T3's bundled manifest, not from the mock; every answer is scripted. No subagents (`Agent` tool), background tasks, hooks, MCP tool calls, skills, `/compact` execution
-  (T3 adds the command itself), file checkpointing / rewind, image blocks or `get_context_usage` realism. The tool path in approval cards is the absolute runner path (Claude sends absolute `file_path`).
+  context window ("190k/1m") come from T3's bundled manifest, not from the mock; every answer is scripted. Subagents (`Agent` tool), background tasks, hooks, MCP tool calls, skills, `/compact`, rewind, image blocks, web tools: see "Claude gaps closed" below. Still absent: `get_context_usage` realism and the items listed there.
+  The tool path in approval cards is the absolute runner path (Claude sends absolute `file_path`).
   Settings > Providers still lists the disabled built-in Codex/Grok rows, and S20 deliberately seeds Grok next to Claude.
   No dynamic-tool or background-terminal frames are produced (permission, MCP elicitation, subagent, goal, revert, MCP app, web search and retry frames are: see "Codex gaps closed" below). `thread/compact/start` runs a bare `contextCompaction` turn. Agent messages are `phase:"final_answer"` unless a scenario says `phase:"commentary"`.
   The file-change approval card shows the absolute runner path of the file (Codex sends absolute paths). Switching provider mid-thread (S20) leaks T3's handoff prompt into the
@@ -398,6 +398,46 @@ Item types T3 ignores (hookPrompt, imageView, sleep, review mode, image generati
   it remounts the thread (scene toggle + reopen) and requires the text there (`s40-streaming-held-remounted.png`, `s40-complete-remounted.png`). `open_thread` retries via scene toggle; BACK from the list
   leaves the app, so it is never the fallback. In `both` mode gate/hold release files are cleared before each gated scenario (the Grok pass otherwise pre-releases the Codex pass's gates).
   Note: S03 table content is scripted text and still lists "grok (mock)" as a table row; that is scenario content, not provider branding.
+
+## Claude gaps closed (track claude-gaps)
+
+Audit of T3's `ClaudeAdapterV2.ts` + recorded SDK transcripts (`orchestration-v2/testkit/fixtures/claude_*`, t3code main 2026-10-23) against `adapters/claude.mjs`.
+New pack `claude-extra` (`scenarios=claude-extra`, drivers s60-s71, runs named `claude-<driver>`); unit tests `test/claude-gaps.test.mjs`. New provider-neutral IR ops
+(`lib/ir.mjs`): `skill`, `hook`, `compact`, `notice`, `bgControl`; extended `tool` (`name`/`server`/`display`/`serverDisplay`), `web` (`fetch`, `results`), `read` (image files), `bgTask`
+(live output + kill handle); reused `subagent`, `bgTask`, `retry`, `goal`, `web`. ACP / Codex adapters degrade them (plain tool call, a `say`, or no-op).
+
+| Gap | Wire form the mock now sends | Driver |
+| --- | --- | --- |
+| Subagents | `Agent` tool_use, `system task_started {task_type:local_agent}`, child `user`/`assistant` frames with `parent_tool_use_id`, `task_progress`, `task_updated`, `task_notification`, Agent `tool_result` | s60 |
+| Background Bash | `Bash {run_in_background:true}`, `background_tasks_changed` roster, `task_started {task_type:local_bash}`, ack `tool_result`; after the turn: roster + `task_updated` + `task_notification`, then a wake turn (`init` / assistant / `result`, no user message) | s61 |
+| `TaskOutput` / `TaskStop` | tool_use rows, `<retrieval_status>` text (shape approximated), stop = roster + `task_updated killed` + `task_notification stopped` + the real process killed (current CLI names; the legacy `BashOutput`/`KillShell` are not emitted) | s61 |
+| Monitor | `Monitor {persistent}` tool_use + `Monitor started` ack, `stream ended` notification | s62 |
+| Hooks | `hook_started` / `hook_response` system frames | s63 |
+| MCP tools | `mcp__<server>__<tool>` tool_use + `tool_use_meta {display_name, server_display_name}`; servers in `init.mcp_servers` + `mcp_status` | s64 |
+| Skills / slash commands | `<cwd>/.claude/skills/<n>/SKILL.md` listed in `init.skills`; user message ending `/<n> args` -> scenario `skill-run` (`Skill` tool_use + SKILL.md `Read`) | s65 |
+| `/compact`, auto-compaction | `status compacting` -> `status {compact_result}` -> `compact_boundary {pre_tokens, post_tokens}` + synthetic summary + `result {local_command:"compact"}`; later turns start from the compacted size | s66 |
+| Rewind | `--resume=<id> --resume-session-at=<assistant uuid>`: the mock persists the last root assistant uuid per turn and drops later turns | s67 |
+| Images | user `image` content blocks decoded (PNG/GIF header) and described; `Read` of an image file returns an `image` block | s68 |
+| WebSearch / WebFetch | `WebSearch` with structured `{query, results:[{content:[{title,url}]}], durationSeconds}`, `WebFetch {url, prompt}` | s69 |
+| `api_retry`, notices | `system api_retry {attempt, max_retries, retry_delay_ms, error_status}`, `system informational {level}` | s70 |
+| `/goal` | synthetic `Goal set:` / `Goal active:` / `Goal cleared:` assistant lines + `Stop hook feedback` user frames | s71 |
+
+Not built (honest): background *subagents* (`run_in_background` Agent + `SendMessage` resume), nested subagents, subagent permission prompts, `claude_ai_*` connector tool names, `forkSession` / thread fork
+(T3 reads the CLI's own transcript JSONL from disk, which the mock does not write), `/context` / `/cost` local-command output, file checkpointing (`rewindFiles`), `ToolSearch`, MCP elicitation for Claude.
+T3 side: its Claude adapter has no handler for `hook_*` frames (not rendered) and MCP server status is not shown anywhere in the UI.
+
+Observed T3 rendering (adversarial review, pack `claude-extra` run LOCALLY on macOS against t3code `3f3a1bf4` with a `xvfb-run` shim, PNGs read; the GitHub Actions queue was stalled for hours so no CI run existed yet).
+The drivers now hard-assert these (they were `FINDING` lines before review):
+
+* **s60** running child = row `explorer Running / Running Read src/greeting.ts` + Lineage panel "1 running"; finished = `2 subagents / 2 done` summary row (expand: `explorer`, `builder` + their `task_notification` summaries), Lineage "Previous agents (2)", child thread page "Subagent of <parent>" with the child's own Read + text.
+* **s61** composer banner `Running: Run the build` + Stop while the roster has the task, cleared after `task_notification`; wake turn text and a `Command "Run the build" finished` row; `TaskStop` is its own row with the result JSON, `TaskOutput` folds into a "Ran 1 command and used 1 tool" group.
+* **s62** persistent Monitor banner is `<description>` + Stop (no `Running:` prefix), `Monitor ... finished` after the notification.
+* **s64** group row "Used Linear and Docs integrations", child rows titled by `tool_use_meta.display_name` ("List issues", "Search docs"); raw `mcp__` names never shown.
+* **s65** `$` picker lists workspace skills title-cased ("Release Notes" + description + "Project Skill" badge); the chosen skill is a chip in the user bubble and the CLI gets `/release-notes for version 1.2`.
+* **s66** `Compacting context` row, divider `Context compacted 24K -> 1.19K tokens`, mid-turn auto divider `168K -> 4.20K tokens`, later turns count from the compacted history.
+* **s67** "Edit from here" respawns the CLI with `--resume-session-at`; next answer is "turn 3" again and quotes turn 2.
+* **s68** attachment thumbnail in composer and user bubble, `Read` of a PNG shows an inline image. **s69** group "Searched the web 2 times", expanded rows show query, result links and the WebFetch result JSON (T3 prints the raw JSON). **s70** `Retrying provider (2/5)` row and the informational notice text. **s71** `Pursuing goal` banner.
+* Local-run caveats (not CI): a Mac with personal skills lists them above the project skill in the `$` picker; macOS needs `ControlOrMeta+A` (fixed); `/private` shows up in paths because `/tmp` is a symlink there. Packs `claude` on the same local setup: s18/s20/s22 fail identically on `origin/main` (local Mac/T3 drift, not a branch regression), other 17 ok.
 
 ## Known limits
 

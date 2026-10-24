@@ -2,6 +2,7 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deflateSync } from "node:zlib";
 import { dumpPage } from "./ui.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -91,4 +92,47 @@ export async function must(page, loc, what, timeout = 20_000) {
     throw new Error(`expected UI element not found: ${what}`);
   }
   return loc.first();
+}
+
+// ---- Claude-gaps helpers -----------------------------------------------------------------------------------------------
+// Solid-colour PNG (valid zlib + CRC) so image drivers need no binary fixtures.
+export function makePng(width = 64, height = 48, [r, g, b] = [34, 139, 230]) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (buf) => {
+    let c = 0xffffffff;
+    for (const x of buf) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const c = Buffer.alloc(4);
+    c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // RGB
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: width }, () => [r, g, b]).flat())]);
+  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+}
+
+// Check that does not fail the driver: prints `FINDING <label>: <value>` (what T3 does / does not render is recorded, not assumed).
+export async function finding(label, fn) {
+  let v;
+  try {
+    v = await fn();
+  } catch (e) {
+    v = `error: ${String(e?.message ?? e).split("\n")[0]}`;
+  }
+  console.log(`FINDING ${label}: ${v}`);
+  return v;
 }
