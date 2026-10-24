@@ -93,7 +93,14 @@ jobs:
           bash scripts/apt-install.sh build-essential pkg-config libsecret-1-dev xvfb xdotool x11-utils imagemagick libgbm1 libnss3 libgtk-3-0t64 libasound2t64 libxss1 libxtst6 libatk-bridge2.0-0t64
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Setup ffmpeg (static build; mock recording)
+        id: ff1
+        continue-on-error: true
         if: inputs.mock
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          github-token: ${{ github.token }}
+      - name: Setup ffmpeg (static build; mock recording) (retry; download flakes)
+        if: ${{ steps.ff1.outcome == 'failure' && inputs.mock }}
         uses: FedericoCarboni/setup-ffmpeg@v3
         with:
           github-token: ${{ github.token }}
@@ -143,6 +150,13 @@ jobs:
           name: out-desktop
           path: dl
       - name: Setup ffmpeg (static build; apt mirror stalls on runners)
+        id: ff1
+        continue-on-error: true
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          github-token: ${{ github.token }}
+      - name: Setup ffmpeg (static build; apt mirror stalls on runners) (retry; download flakes)
+        if: ${{ steps.ff1.outcome == 'failure' }}
         uses: FedericoCarboni/setup-ffmpeg@v3
         with:
           github-token: ${{ github.token }}

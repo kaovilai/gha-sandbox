@@ -162,6 +162,13 @@ jobs:
       contents: write
     steps:
       - name: Setup ffmpeg (static build; apt mirror stalls on runners)
+        id: ff1
+        continue-on-error: true
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          github-token: ${{ github.token }}
+      - name: Setup ffmpeg (static build; apt mirror stalls on runners) (retry; download flakes)
+        if: ${{ steps.ff1.outcome == 'failure' }}
         uses: FedericoCarboni/setup-ffmpeg@v3
         with:
           github-token: ${{ github.token }}
