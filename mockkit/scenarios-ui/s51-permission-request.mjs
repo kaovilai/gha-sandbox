@@ -12,6 +12,8 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(800);
   const info = await dumpPage(page, "s51 pending");
   console.log(`FINDING reason shown: ${/Write build output to dist/.test(info.text)} card label: ${JSON.stringify(info.text.match(/(File change|File read|Command|App permission) approval/)?.[0] ?? null)}`);
+  // T3 renders only `reason` (never the `permissions` profile: the granted paths are not shown), so the mock's reason names the path
+  console.log(`FINDING granted path visible via the reason text: ${/needs write access to \S*\/dist/.test(info.text)}`);
   await shot("pending");
   await page.getByRole("button", { name: /^Approve$/ }).first().click();
   await page.getByText(/Granted: wrote/).first().waitFor({ timeout: 60_000 });

@@ -134,6 +134,16 @@
     "s58-mcp-app",
     "s59-subagent-approval"
   ],
+  "codex-extra2": [
+    "s70-background-terminal",
+    "s71-thread-closed",
+    "s72-dynamic-tool",
+    "s73-async-question",
+    "s74-subagent-activity",
+    "s75-raw-reasoning",
+    "s76-mcp-app-interactive",
+    "s77-feedback-command"
+  ],
   "explore": [
     "s00-explore"
   ],
