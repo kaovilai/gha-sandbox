@@ -130,7 +130,7 @@ test("perm-grant: item/permissions/requestApproval carries the permission profil
   const threadId = await startThread(c);
   await c.request("turn/start", turnParams(threadId, c.cwd, "[mock:perm-grant] go"));
   const req = await c.waitFor((f) => f.method === "item/permissions/requestApproval");
-  assert.equal(req.params.reason, "Write build output to dist/");
+  assert.match(req.params.reason, /^Write build output to dist\/ \(needs write access to .*\/dist\)$/, "T3 renders only the reason, so it names the granted path");
   assert.deepEqual(req.params.permissions.fileSystem.write, [join(c.cwd, "dist")]);
   assert.equal(req.params.cwd, c.cwd);
   assert.ok(req.params.itemId && req.params.turnId && req.params.startedAtMs);

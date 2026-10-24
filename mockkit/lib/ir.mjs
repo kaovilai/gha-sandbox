@@ -17,7 +17,7 @@
 //   {bgTask:{cmd,description?,kind?,persistent?,until?}}  background task (xAI protocol): kind "command" (default) = tool call completes at
 //                                        once with a `BackgroundTaskStarted` ack, kind "monitor" (+ persistent) = Monitor tool + task_backgrounded.
 //                                        The REAL `sh -c cmd` keeps running past the end of the turn; completion is reported when it exits (and the
-//                                        optional hold gate `until` is released). ACP/Grok adapter only; others run it as a plain `sh` step.
+//                                        optional hold gate `until` is released). ACP/Grok and Codex (see below); Claude runs it as a plain `sh` step.
 //   {hold:{name}}                        block until $MOCK_CONTROL_DIR/release/<name> exists
 //   {sleep:{ms}}                         sleep
 //   Codex-flavored ops (provider-neutral: adapters without a native form degrade, see below):
@@ -33,9 +33,20 @@
 //                                        mcpAppUi + mcpServer/resource/read); degrade: a plain tool call
 //   {retry:{message,attempt,max}}        transient provider retry notice (Codex error willRetry:true); degrade: no-op
 //   say takes `phase:"commentary"` (Codex agentMessage phase); ignored elsewhere.
+//   Codex gaps 2 (track codex-gaps-2):
+//   {dynTool:{namespace?,tool,input?,output?,success?}}   dynamic tool call (Codex dynamicToolCall item, e.g. node_repl.js); degrade: a plain tool call
+//   {asyncAsk:{text?,questions:[{title,options?}]}}       async question: the agent message carries the questions and the turn ENDS; the
+//                                        answer arrives later as a normal user message (Codex agentMessage.delivery "async"); degrade: plain text
+//   think takes `raw:true` (Codex raw reasoning `item/reasoning/textDelta`); ignored elsewhere.
+//   bgTask on Codex = a commandExecution item that outlives the turn (background terminal, thread/backgroundTerminals/*, T3 re-prompts the
+//                                        agent when it exits); `close:true` = thread/closed kills the terminal instead of a completion (needs `until`).
+//   subagent takes `path` (Codex subAgentActivity protocol: agentPath becomes the row title), `reasoningEffort`, `reroute` (model/rerouted
+//                                        to this model mid-run), `settings` ({model,effort}: thread/settings/updated); ignored elsewhere.
+//   mcpApp takes `tools:[{name,description?,inputSchema?,visibility?,result}]` (served by mcpServerStatus/list + mcpServer/tool/call, so the
+//                                        app's own script can call them over the MCP Apps bridge); ignored elsewhere.
 //
 // Adapters implement the `sink` (message, thought, toolStart, toolUpdate, permission, ask, plan; optional:
-// exitPlan, elicit, grant, subagent, goal, web, retry).
+// exitPlan, elicit, grant, subagent, goal, web, mcpApp, retry, bgStart/bgOutput/bgDone/bgClose, dynamicTool, asyncAsk; thought(text,{raw})).
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -74,6 +85,8 @@ export const S = {
   mcpApp: (o) => ({ mcpApp: o }),
   web: (query, o = {}) => ({ web: { query, ...o } }),
   retry: (message, attempt = 1, max = 5) => ({ retry: { message, attempt, max } }),
+  dynTool: (o) => ({ dynTool: o }),
+  asyncAsk: (o) => ({ asyncAsk: o }),
 };
 
 export function flatten(steps) {
@@ -101,7 +114,7 @@ export async function runSteps(stepsIn, sink, ctx) {
       case "say":
       case "think": {
         const words = a.chunk ?? pace.chunkWords;
-        const emit = type === "say" ? (t) => sink.message(t, { phase: a.phase }) : (t) => sink.thought(t);
+        const emit = type === "say" ? (t) => sink.message(t, { phase: a.phase }) : (t) => sink.thought(t, { raw: a.raw === true });
         const chunks = chunkText(a.text, words);
         for (let i = 0; i < chunks.length; i++) {
           emit(chunks[i]);
@@ -171,7 +184,19 @@ export async function runSteps(stepsIn, sink, ctx) {
         const info = { id, taskId, cmd: a.cmd, description: a.description ?? a.cmd, kind: a.kind ?? "command", persistent: a.persistent === true };
         sink.bgStart(info);
         // outlives the turn on purpose (no abort wiring: Stop must not kill it, process exit does)
-        runShell(a.cmd, { ...ctx, signal: undefined }, () => {})
+        const run = runShell(a.cmd, { ...ctx, signal: undefined }, (acc) => sink.bgOutput?.(info, acc));
+        info.kill = run.kill;
+        if (a.close && sink.bgClose) {
+          // thread/closed variant: the terminal never reports completion, the thread is unloaded (and its terminals killed) at the gate
+          (async () => {
+            if (a.until) await holdGate(a.until, { env: ctx.env, log });
+            run.kill();
+            log?.("bgTask", { state: "closed", taskId });
+            sink.bgClose(info);
+          })().catch((e) => log?.("crash", { error: String(e?.stack ?? e) }));
+          break;
+        }
+        run
           .then(async (res) => {
             if (a.until) await holdGate(a.until, { env: ctx.env, log });
             log?.("bgTask", { state: "completed", taskId, exitCode: res.code });
@@ -279,6 +304,25 @@ export async function runSteps(stepsIn, sink, ctx) {
         await runSteps([{ tool: { kind: "other", title: a.title ?? `${a.server}.${a.name}`, input: a.input, output: a.output ?? "(interactive MCP app, not rendered by this provider)" } }], sink, ctx);
         break;
       }
+      case "dynTool": {
+        const id = ctx.nextToolId();
+        await sleep(pace.toolMs, signal);
+        if (sink.dynamicTool) {
+          await sink.dynamicTool({ id, ...a });
+          break;
+        }
+        await runSteps([{ tool: { kind: "other", title: [a.namespace, a.tool].filter(Boolean).join("."), input: a.input, output: a.output ?? "ok" } }], sink, ctx);
+        break;
+      }
+      case "asyncAsk": {
+        if (sink.asyncAsk) {
+          await sink.asyncAsk(a);
+          break;
+        }
+        const list = (a.questions ?? []).map((q) => `- ${q.title}${q.options?.length ? ` (${q.options.join(" / ")})` : ""}`).join("\n");
+        await runSteps([{ say: { text: `${a.text ?? ""}${a.text ? "\n\n" : ""}${list}` } }], sink, ctx);
+        break;
+      }
       case "goal":
         sink.goal?.(a);
         break;
@@ -320,7 +364,8 @@ process.on("exit", () => {
 });
 
 function runShell(cmd, ctx, onOutput) {
-  return new Promise((resolveP) => {
+  let killFn = () => {};
+  const promise = new Promise((resolveP) => {
     const child = spawn("sh", ["-c", cmd], {
       cwd: ctx.cwd,
       env: { ...ctx.env, TERM: "xterm-256color", FORCE_COLOR: "1" },
@@ -342,6 +387,7 @@ function runShell(cmd, ctx, onOutput) {
         child.kill("SIGTERM");
       }
     };
+    killFn = kill;
     ctx.signal?.addEventListener("abort", kill, { once: true });
     child.on("close", (code) => {
       liveShells.delete(child.pid);
@@ -350,4 +396,6 @@ function runShell(cmd, ctx, onOutput) {
     });
     child.on("error", (e) => resolveP({ code: 127, output: acc + String(e.message) }));
   });
+  promise.kill = () => killFn(); // SIGTERM the process group (background terminals: terminate / thread closed)
+  return promise;
 }

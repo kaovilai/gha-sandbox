@@ -5,7 +5,7 @@
 // Also exports `execText()` for the `codex exec ... --output-last-message F` text-generation path.
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { ScenarioError, runSteps } from "../lib/ir.mjs";
 import { controlDir } from "../lib/hold.mjs";
@@ -143,8 +143,20 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
   let nextItem = 0;
   let nextProc = 4000;
   const mcpResources = new Map(); // ui:// uri -> html, served by mcpServer/resource/read
-  const resetCredits = { available: Number(env.MOCK_CODEX_RESET_CREDITS ?? 2) };
-  const stateDir = join(controlDir({ ...process.env, ...env }), "codex-threads");
+  const ctlDir = controlDir({ ...process.env, ...env });
+  const stateDir = join(ctlDir, "codex-threads");
+  // Account state (reset credits) must outlive this process: T3 redeems a credit on a SEPARATE short-lived app-server, then re-probes
+  // account/rateLimits/read on yet another one, so the snapshot only refreshes if every process reads the same file.
+  const accountFile = join(ctlDir, "codex-account.json");
+  const accountState = () => ({ available: Number(env.MOCK_CODEX_RESET_CREDITS ?? 2), used: false, ...(readJson(accountFile) ?? {}) });
+  const saveAccountState = (st) => {
+    try {
+      mkdirSync(ctlDir, { recursive: true });
+      writeFileSync(accountFile, JSON.stringify(st));
+    } catch {}
+  };
+  const bgProcs = new Map(); // processId -> background terminal (commandExecution item that outlives its turn)
+  const mcpServers = new Map(); // server -> Map(tool name -> { name, description, inputSchema, visibility, result }), served by mcpServerStatus/list
 
   const write = (obj) => {
     log("out", { frame: obj });
@@ -232,7 +244,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
       const o = open;
       open = null;
       if (o.type === "agentMessage") emitDone({ type: "agentMessage", id: o.id, text: o.text, phase: o.phase, memoryCitation: null, delivery: null, questions: null });
-      else emitDone({ type: "reasoning", id: o.id, summary: [o.text], content: [] });
+      else emitDone({ type: "reasoning", id: o.id, summary: o.raw ? [] : [o.text], content: o.raw ? [o.text] : [] });
     };
     const cmdItem = (id, command, actions, status, extra = {}) => ({
       type: "commandExecution",
@@ -264,16 +276,19 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         outChars += text.length;
         notify("item/agentMessage/delta", { threadId: t.id, turnId, itemId: open.id, delta: text });
       },
-      thought(text) {
-        if (open?.type !== "reasoning") {
+      thought(text, o = {}) {
+        // raw:true = the model's raw reasoning (item/reasoning/textDelta -> reasoning `content`), else the summary stream
+        const raw = o.raw === true;
+        if (open?.type !== "reasoning" || open.raw !== raw) {
           closeOpen();
-          open = { type: "reasoning", id: `rs_mock_${++nextItem}`, text: "" };
+          open = { type: "reasoning", id: `rs_mock_${++nextItem}`, text: "", raw };
           emitStart({ type: "reasoning", id: open.id, summary: [], content: [] });
-          notify("item/reasoning/summaryPartAdded", { threadId: t.id, turnId, itemId: open.id, summaryIndex: 0 });
+          if (!raw) notify("item/reasoning/summaryPartAdded", { threadId: t.id, turnId, itemId: open.id, summaryIndex: 0 });
         }
         open.text += text;
         outChars += text.length;
-        notify("item/reasoning/summaryTextDelta", { threadId: t.id, turnId, itemId: open.id, delta: text, summaryIndex: 0 });
+        if (raw) notify("item/reasoning/textDelta", { threadId: t.id, turnId, itemId: open.id, delta: text, contentIndex: 0 });
+        else notify("item/reasoning/summaryTextDelta", { threadId: t.id, turnId, itemId: open.id, delta: text, summaryIndex: 0 });
       },
       toolStart(x) {
         closeOpen();
@@ -473,8 +488,11 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         const g = res?.permissions ?? {};
         return g.fileSystem?.read?.length || g.fileSystem?.write?.length || g.network?.enabled ? "allow" : "reject";
       },
-      // Spawn an agent: a collabAgentToolCall spawnAgent item registers a child thread in T3, the child then runs its own
-      // turn (own threadId/turnId, its items stream with the child ids), and a `wait` item reports the child's final state.
+      // Spawn an agent. Two wire forms (T3 handles both):
+      //  * default: a collabAgentToolCall spawnAgent item registers a child thread, a `wait` item reports the child's final state;
+      //  * `path` set: the newer subAgentActivity items (kind started/completed, agentPath = the row title T3 shows).
+      // The child then runs its own turn (own threadId/turnId, its items stream with the child ids). `settings` / `reroute` push
+      // thread/settings/updated and model/rerouted for the child (T3 only consumes them for subagents: the row's model/effort).
       async subagent(a, runChild) {
         closeOpen();
         const child = newThread({ cwd: t.cwd, model: a.model ?? t.model, restore: false });
@@ -482,17 +500,44 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         child.agentNickname = a.name ?? "worker";
         child.agentRole = a.role ?? "worker";
         child.approvalPolicy = t.approvalPolicy;
-        const base = { type: "collabAgentToolCall", senderThreadId: t.id, prompt: a.prompt ?? "", model: a.model ?? null, reasoningEffort: null };
+        const activity = typeof a.path === "string" && a.path !== "";
+        const base = { type: "collabAgentToolCall", senderThreadId: t.id, prompt: a.prompt ?? "", model: a.model ?? null, reasoningEffort: a.reasoningEffort ?? null };
         const spawn = { ...base, id: a.id, tool: "spawnAgent" };
-        emitStart({ ...spawn, status: "inProgress", receiverThreadIds: [], agentsStates: {} });
-        await sleep(pace.toolMs, signal);
-        emitDone({ ...spawn, status: "completed", receiverThreadIds: [child.id], agentsStates: { [child.id]: { status: "running", message: null } } });
-        notify("thread/started", { thread: threadObject(child) });
+        const act = (kind, id = a.id) => ({ type: "subAgentActivity", id, agentPath: a.path, agentThreadId: child.id, kind });
+        if (activity) {
+          emitStart(act("started"));
+          await sleep(pace.toolMs, signal);
+          notify("thread/started", { thread: threadObject(child) });
+          emitDone(act("started"));
+        } else {
+          emitStart({ ...spawn, status: "inProgress", receiverThreadIds: [], agentsStates: {} });
+          await sleep(pace.toolMs, signal);
+          emitDone({ ...spawn, status: "completed", receiverThreadIds: [child.id], agentsStates: { [child.id]: { status: "running", message: null } } });
+          notify("thread/started", { thread: threadObject(child) });
+        }
         const childTurnId = randomUUID();
         const cStart = nowSec();
         const shell = (status, extra = {}) => ({ id: childTurnId, items: [], itemsView: "notLoaded", status, error: null, startedAt: cStart, completedAt: null, durationMs: null, ...extra });
         notify("thread/status/changed", { threadId: child.id, status: { type: "active", activeFlags: [] } });
         notify("turn/started", { threadId: child.id, turn: shell("inProgress") });
+        if (a.settings) {
+          const m = a.settings.model ?? child.model;
+          notify("thread/settings/updated", {
+            threadId: child.id,
+            threadSettings: {
+              approvalPolicy: "on-request",
+              approvalsReviewer: "user",
+              collaborationMode: { mode: "default", settings: { model: m, reasoning_effort: a.settings.effort ?? null } },
+              cwd: t.cwd,
+              effort: a.settings.effort ?? null,
+              model: m,
+              modelProvider: "openai",
+              sandboxPolicy: { type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
+              serviceTier: null,
+            },
+          });
+        }
+        if (a.reroute) notify("model/rerouted", { threadId: child.id, turnId: childTurnId, fromModel: child.model, toModel: a.reroute, reason: "highRiskCyberActivity" });
         const crt = makeTurnRuntime(child, childTurnId, signal);
         let status = "completed";
         try {
@@ -508,10 +553,67 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         persist(child);
         notify("turn/completed", { threadId: child.id, turn: shell(status, { items: crt.items, itemsView: "summary", completedAt: cDone, durationMs: Math.max(1, (cDone - cStart) * 1000) }) });
         const last = [...crt.items].reverse().find((i) => i.type === "agentMessage");
-        const waitItem = { ...base, prompt: null, model: null, id: `${a.id}-wait`, tool: "wait", receiverThreadIds: [child.id] };
-        emitStart({ ...waitItem, status: "inProgress", agentsStates: { [child.id]: { status: "running", message: null } } });
-        emitDone({ ...waitItem, status: "completed", agentsStates: { [child.id]: { status: status === "completed" ? "completed" : "interrupted", message: a.result ?? last?.text ?? null } } });
+        if (activity) {
+          emitDone(act(status === "completed" ? "completed" : "interrupted", `${a.id}-${status === "completed" ? "completed" : "interrupted"}`));
+        } else {
+          const waitItem = { ...base, prompt: null, model: null, id: `${a.id}-wait`, tool: "wait", receiverThreadIds: [child.id] };
+          emitStart({ ...waitItem, status: "inProgress", agentsStates: { [child.id]: { status: "running", message: null } } });
+          emitDone({ ...waitItem, status: "completed", agentsStates: { [child.id]: { status: status === "completed" ? "completed" : "interrupted", message: a.result ?? last?.text ?? null } } });
+        }
         if (status === "interrupted") throw abortError();
+      },
+      // ---- background terminal: a commandExecution item that outlives its turn ---------------------------
+      // The item starts inProgress and the turn completes while it runs; T3 keeps the settled turn context alive, projects late output
+      // (item/commandExecution/outputDelta) and, when the command finally completes, wakes the agent with a continuation message.
+      bgStart(info) {
+        closeOpen();
+        const item = cmdItem(info.id, `/bin/bash -lc ${esc(info.cmd)}`, [{ type: "unknown", command: info.cmd }], "inProgress");
+        const rec = { id: info.id, item, startedAt: Date.now(), sent: 0, threadId: t.id, turnId, kill: info.kill, done: false };
+        bgProcs.set(item.processId, rec);
+        emitStart(item);
+      },
+      bgOutput(info, acc) {
+        const rec = [...bgProcs.values()].find((r) => r.id === info.id);
+        if (!rec || rec.done || acc.length <= rec.sent) return;
+        notify("item/commandExecution/outputDelta", { threadId: t.id, turnId, itemId: info.id, delta: acc.slice(rec.sent) });
+        rec.sent = acc.length;
+      },
+      bgDone(info) {
+        const rec = [...bgProcs.values()].find((r) => r.id === info.id);
+        if (!rec || rec.done) return; // terminated / closed earlier
+        rec.done = true;
+        bgProcs.delete(rec.item.processId);
+        emitDone({ ...rec.item, status: info.exitCode === 0 ? "completed" : "failed", aggregatedOutput: info.output ?? "", exitCode: info.exitCode ?? 0, durationMs: Date.now() - rec.startedAt });
+      },
+      bgClose(info) {
+        // Codex unloads an idle thread a while after it settles: its terminals die WITHOUT completing their items, then thread/closed.
+        const rec = [...bgProcs.values()].find((r) => r.id === info.id);
+        if (rec) {
+          rec.done = true;
+          bgProcs.delete(rec.item.processId);
+        }
+        notify("thread/closed", { threadId: t.id });
+      },
+      // dynamicToolCall: a client-side dynamic tool (e.g. node_repl.js). `arguments.persistent:true` would keep it running past the turn.
+      async dynamicTool(x) {
+        closeOpen();
+        const base = { type: "dynamicToolCall", id: x.id, namespace: x.namespace ?? null, tool: x.tool, arguments: x.input ?? {}, contentItems: null, success: null, durationMs: null };
+        const t0 = Date.now();
+        emitStart({ ...base, status: "inProgress" });
+        await sleep(pace.toolMs, signal);
+        const ok = x.success !== false;
+        emitDone({ ...base, status: ok ? "completed" : "failed", success: ok, durationMs: Date.now() - t0, contentItems: x.output === undefined ? null : [{ type: "inputText", text: String(x.output) }] });
+      },
+      // Async question: the agent message itself carries the questions (delivery "async"); T3 turns it into a pending question the user can answer
+      // OR dismiss, and the answer comes back as an ordinary user message (a new turn). The turn does not wait for it.
+      async asyncAsk(a) {
+        closeOpen();
+        const id = `msg_mock_${++nextItem}`;
+        const questions = (a.questions ?? []).map((q) => ({ title: q.title, options: q.options ?? null }));
+        const msg = (text) => ({ type: "agentMessage", id, text, phase: "final_answer", memoryCitation: null, delivery: "async", questions });
+        emitStart(msg(""));
+        await sleep(pace.toolMs, signal);
+        emitDone(msg(a.text ?? ""));
       },
       goal(a) {
         const g = t.goal;
@@ -534,6 +636,11 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         closeOpen();
         const uri = x.uri ?? `ui://${x.server}/${x.name}.html`;
         mcpResources.set(uri, x.html);
+        if (x.tools?.length) {
+          const reg = mcpServers.get(x.server) ?? new Map();
+          for (const tl of x.tools) reg.set(tl.name, tl);
+          mcpServers.set(x.server, reg);
+        }
         const base = { type: "mcpToolCall", id: x.id, server: x.server, tool: x.name, arguments: x.input ?? {}, result: null, error: null, durationMs: null, mcpAppUi: { resourceUri: uri, preferredModelDisplayMode: "inline" }, mcpAppResourceUri: uri };
         const t0 = Date.now();
         emitStart({ ...base, status: "inProgress" });
@@ -717,6 +824,7 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         // MOCK_CODEX_ACCOUNT=chatgpt adds what a subscription account reports: account id, reset credits, a 5h + weekly window.
         const chat = env.MOCK_CODEX_ACCOUNT === "chatgpt";
         const plan = env.MOCK_CODEX_PLAN || "plus";
+        const resetCredits = accountState();
         const snap = { limitId: "codex", limitName: null, planType: plan, primary: { usedPercent: resetCredits.used ? 0 : 23, windowDurationMins: 300, resetsAt: nowSec() + 2 * 3600 }, secondary: { usedPercent: resetCredits.used ? 0 : 41, windowDurationMins: 10080, resetsAt: nowSec() + 5 * 86400 } };
         return reply(id, {
           rateLimits: snap,
@@ -732,9 +840,10 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         });
       }
       case "account/rateLimitResetCredit/consume": {
+        const resetCredits = accountState();
         if (resetCredits.available <= 0) return reply(id, { outcome: "noCredit" });
-        resetCredits.available -= 1;
-        resetCredits.used = true; // the next account/rateLimits/read reports cleared windows
+        // persisted: the next account/rateLimits/read (any process) reports cleared windows and one credit fewer
+        saveAccountState({ available: resetCredits.available - 1, used: true });
         return reply(id, { outcome: "reset" });
       }
       case "skills/list":
@@ -840,20 +949,60 @@ export function serveCodex({ input = process.stdin, output = process.stdout, env
         return;
       }
       case "thread/inject_items":
-      case "thread/backgroundTerminals/terminate":
       case "thread/unarchive":
         return reply(id, {});
-      case "thread/backgroundTerminals/list":
-        return reply(id, { data: [] });
-      case "mcpServerStatus/list":
-        return reply(id, { data: [], nextCursor: null });
+      case "thread/backgroundTerminals/list": {
+        const data = [...bgProcs.values()].filter((r) => !r.done && r.threadId === params.threadId).map((r) => ({ processId: r.item.processId, command: r.item.command, cwd: r.item.cwd, itemId: r.id, turnId: r.turnId }));
+        return reply(id, { data, nextCursor: null });
+      }
+      case "thread/backgroundTerminals/terminate": {
+        // Stop / interrupt: kill the terminal; its item completes as failed (exit 143), the thread stays alive.
+        const rec = bgProcs.get(String(params.processId));
+        if (!rec || rec.done || rec.threadId !== params.threadId) return reply(id, { terminated: false });
+        rec.done = true;
+        bgProcs.delete(String(params.processId));
+        rec.kill?.();
+        log("bgTask", { state: "terminated", processId: params.processId });
+        notify("item/completed", { item: { ...rec.item, status: "failed", aggregatedOutput: null, exitCode: 143, durationMs: Date.now() - rec.startedAt }, threadId: rec.threadId, turnId: rec.turnId, completedAtMs: Date.now() });
+        return reply(id, { terminated: true });
+      }
+      case "mcpServerStatus/list": {
+        // Real tool data for the MCP servers a scenario registered (mcpApp tools): T3 reads it to decide whether an MCP app may call a tool.
+        const want = params.serverName;
+        const data = [...mcpServers.entries()]
+          .filter(([name]) => !want || name === want)
+          .map(([name, tools]) => ({
+            name,
+            authStatus: "unsupported",
+            tools: Object.fromEntries([...tools.values()].map((tl) => [tl.name, { name: tl.name, title: tl.title ?? null, description: tl.description ?? null, inputSchema: tl.inputSchema ?? { type: "object", properties: {} }, ...(tl.visibility ? { _meta: { ui: { visibility: tl.visibility } } } : {}) }])),
+            resources: [],
+            resourceTemplates: [],
+          }));
+        return reply(id, { data, nextCursor: null });
+      }
+      case "feedback/upload": {
+        // `/feedback [reason]` in the composer (Codex only): T3 shows "Feedback sent to OpenAI" + the returned thread id
+        const feedbackId = randomUUID();
+        try {
+          mkdirSync(ctlDir, { recursive: true });
+          appendFileSync(join(ctlDir, "feedback.jsonl"), `${JSON.stringify({ feedbackId, ...params })}\n`);
+        } catch {}
+        log("feedback", { feedbackId, reason: params.reason ?? null, classification: params.classification, threadId: params.threadId });
+        return reply(id, { threadId: feedbackId });
+      }
       case "mcpServer/resource/read": {
         const html = mcpResources.get(params.uri);
         if (html === undefined) return fail(id, -32602, `Unknown resource ${params.uri}`);
         return reply(id, { contents: [{ uri: params.uri, mimeType: "text/html;profile=mcp-app", text: html }] });
       }
-      case "mcpServer/tool/call":
-        return reply(id, { content: [{ type: "text", text: "ok (mock MCP tool)" }], isError: false });
+      case "mcpServer/tool/call": {
+        const tool = mcpServers.get(params.server)?.get(params.tool);
+        if (!tool) return reply(id, { content: [{ type: "text", text: "ok (mock MCP tool)" }], isError: false });
+        const out = typeof tool.result === "function" ? tool.result(params.arguments ?? {}) : (tool.result ?? "ok");
+        log("mcpToolCall", { server: params.server, tool: params.tool, arguments: params.arguments ?? {} });
+        if (out && typeof out === "object") return reply(id, { content: out.content ?? [{ type: "text", text: JSON.stringify(out) }], ...(out.structuredContent ? { structuredContent: out.structuredContent } : {}), isError: out.isError === true });
+        return reply(id, { content: [{ type: "text", text: String(out) }], isError: false });
+      }
       default:
         return fail(id, -32601, `Unhandled request: ${method}`);
     }

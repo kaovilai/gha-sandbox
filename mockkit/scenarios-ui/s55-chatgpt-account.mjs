@@ -2,7 +2,7 @@
 // ChatGPT subscription account, so Settings > Providers shows "ChatGPT Pro 20x Subscription" + the account email, and
 // account/rateLimits/read feeds the usage windows (5h / weekly) and reset credits: shown by the composer's `/usage-limits` command.
 // Codex only (the Grok flavor has no ChatGPT account).
-import { composerEditor, dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
+import { bodyText, composerEditor, dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
 import { gotoPath, must } from "../lib/ui-extra.mjs";
 
 export const meta = { env: { MOCK_CODEX_ACCOUNT: "chatgpt", MOCK_CODEX_PLAN: "pro", MOCK_CODEX_RESET_CREDITS: "1" } };
@@ -32,9 +32,13 @@ export default async function ({ page, shot, env }) {
     await page.waitForTimeout(1500);
     await shot("use-reset-confirm");
     await page.getByRole("button", { name: /^Use credit$/ }).click().catch(() => console.log("FINDING: no 'Use credit' confirm button"));
-    await page.waitForTimeout(4500);
+    // T3 redeems on a SEPARATE app-server process and re-probes account/rateLimits/read on another: the mock persists the account state
+    // (control dir codex-account.json) so the refreshed snapshot shows cleared windows + one credit fewer. Poll for the bars to refresh.
+    const t0 = Date.now();
+    while (Date.now() - t0 < 25_000 && /Use reset/.test(await bodyText(page))) await page.waitForTimeout(500);
+    await page.waitForTimeout(1500);
     const after = await dumpPage(page, "s55 after Use reset");
-    console.log(`FINDING after Use reset: credit-text=${JSON.stringify(after.text.match(/[^\n]*reset credit[^\n]*/i)?.[0] ?? null)} useResetStillThere=${/Use reset/.test(after.text)}`);
+    console.log(`FINDING after Use reset (${Date.now() - t0}ms): credit-text=${JSON.stringify(after.text.match(/[^\n]*reset credit[^\n]*/i)?.[0] ?? null)} useResetStillThere=${/Use reset/.test(after.text)} bars=${JSON.stringify(after.text.match(/(Session|Weekly)[^\n]*\n?[^\n]*left/g) ?? null)} sessionLeft=${JSON.stringify(after.text.match(/Session[\s\S]{0,40}?(\d+)%/)?.[1] ?? null)}`);
     await shot("usage-limits-after-reset");
   }
   await gotoPath(page, "/settings/providers");
