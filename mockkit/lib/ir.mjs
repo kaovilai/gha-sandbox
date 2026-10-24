@@ -33,12 +33,21 @@
 //                                        mcpAppUi + mcpServer/resource/read); degrade: a plain tool call
 //   {retry:{message,attempt,max}}        transient provider retry notice (Codex error willRetry:true); degrade: no-op
 //   say takes `phase:"commentary"` (Codex agentMessage phase); ignored elsewhere.
+//   Claude-flavored ops (track claude-gaps; adapters without a native form degrade, see below):
+//   {skill:{name,args?,body?}}           skill / slash-command execution (Claude `Skill` tool); degrade: one tool call
+//   {hook:{event,name?,output?,exitCode?,outcome?}}  lifecycle hook ran (Claude hook_started/hook_response system frames); degrade: no-op
+//   {compact:{trigger?,pre?,post?,summary?,hold?}}  context compaction (Claude status:compacting + compact_boundary); degrade: a say
+//   {notice:{text,level?}}               provider notice (Claude system `informational`); degrade: a say
+//   {bgControl:{action,task?}}           act on the last background task: "output" (read what it printed) | "stop" (kill it);
+//                                        Claude TaskOutput / TaskStop tool calls; degrade: no-op
+//   tool takes `name` (+`server`): Claude tool identity (`name` alone = native tool name such as Glob / LS; with `server` = mcp__<server>__<name>
+//   and `display`/`serverDisplay` presentation meta); web takes `fetch:true` (WebFetch instead of WebSearch), `results:[{title,url}]`.
 //
 // Adapters implement the `sink` (message, thought, toolStart, toolUpdate, permission, ask, plan; optional:
 // exitPlan, elicit, grant, subagent, goal, web, retry).
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { hold as holdGate } from "./hold.mjs";
 import { abortError, sleep } from "./pace.mjs";
 
@@ -74,6 +83,11 @@ export const S = {
   mcpApp: (o) => ({ mcpApp: o }),
   web: (query, o = {}) => ({ web: { query, ...o } }),
   retry: (message, attempt = 1, max = 5) => ({ retry: { message, attempt, max } }),
+  skill: (name, o = {}) => ({ skill: { name, ...o } }),
+  hook: (event, o = {}) => ({ hook: { event, ...o } }),
+  compact: (o = {}) => ({ compact: o }),
+  notice: (text, o = {}) => ({ notice: { text, ...o } }),
+  bgControl: (action, o = {}) => ({ bgControl: { action, ...o } }),
 };
 
 export function flatten(steps) {
@@ -86,6 +100,8 @@ export function chunkText(text, words) {
   for (let i = 0; i < toks.length; i += words) out.push(toks.slice(i, i + words).join(""));
   return out;
 }
+
+export const IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
 
 const abs = (cwd, p) => (isAbsolute(p) ? p : resolve(cwd, p));
 
@@ -112,7 +128,7 @@ export async function runSteps(stepsIn, sink, ctx) {
       case "tool": {
         const id = ctx.nextToolId();
         await sleep(pace.toolMs, signal);
-        sink.toolStart({ id, kind: a.kind ?? "other", title: a.title, input: a.input, diff: a.diff, locations: a.locations, server: a.server, name: a.name, status: "in_progress" });
+        sink.toolStart({ id, kind: a.kind ?? "other", title: a.title, input: a.input, diff: a.diff, locations: a.locations, server: a.server, name: a.name, display: a.display, serverDisplay: a.serverDisplay, status: "in_progress" });
         await sleep(pace.toolMs, signal);
         sink.toolUpdate({ id, status: a.status ?? "completed", text: a.output, diff: a.diff, output: a.rawOutput ?? a.output });
         break;
@@ -125,13 +141,19 @@ export async function runSteps(stepsIn, sink, ctx) {
         await sleep(pace.toolMs / 2, signal);
         let text;
         let status = "completed";
+        let image;
         try {
-          text = readFileSync(p, "utf8");
+          const mediaType = IMAGE_TYPES[extname(p).toLowerCase()];
+          if (mediaType) {
+            const bytes = readFileSync(p);
+            image = { mediaType, base64: bytes.toString("base64"), bytes: bytes.length };
+            text = `Image file ${a.path} (${mediaType}, ${bytes.length} bytes)`;
+          } else text = readFileSync(p, "utf8");
         } catch (e) {
           text = String(e.message);
           status = "failed";
         }
-        sink.toolUpdate({ id, status, text, output: text });
+        sink.toolUpdate({ id, status, text, output: text, ...(image ? { image } : {}) });
         break;
       }
       case "fsWrite": {
@@ -169,10 +191,16 @@ export async function runSteps(stepsIn, sink, ctx) {
         const taskId = a.taskId ?? `a1b2c3d4-e5f6-4a7b-8c9d-${id.replace(/\D+/g, "").padStart(12, "0")}`; // uuid-shaped like Grok task ids (T3 shows its first 8 chars)
         await sleep(pace.toolMs, signal);
         const info = { id, taskId, cmd: a.cmd, description: a.description ?? a.cmd, kind: a.kind ?? "command", persistent: a.persistent === true };
+        // live handle: what the process printed so far (`bgControl output`) and a kill switch (`bgControl stop`)
+        const handle = { out: "", kill: null, stopped: false, done: false };
+        info.handle = handle;
+        ctx.lastBg = info;
         sink.bgStart(info);
         // outlives the turn on purpose (no abort wiring: Stop must not kill it, process exit does)
-        runShell(a.cmd, { ...ctx, signal: undefined }, () => {})
+        runShell(a.cmd, { ...ctx, signal: undefined }, (acc) => (handle.out = acc), (kill) => (handle.kill = kill))
           .then(async (res) => {
+            handle.done = true;
+            if (handle.stopped) return log?.("bgTask", { state: "stopped", taskId });
             if (a.until) await holdGate(a.until, { env: ctx.env, log });
             log?.("bgTask", { state: "completed", taskId, exitCode: res.code });
             sink.bgDone({ ...info, output: res.output, exitCode: res.code });
@@ -276,7 +304,7 @@ export async function runSteps(stepsIn, sink, ctx) {
           await sink.mcpApp({ id, ...a });
           break;
         }
-        await runSteps([{ tool: { kind: "other", title: a.title ?? `${a.server}.${a.name}`, input: a.input, output: a.output ?? "(interactive MCP app, not rendered by this provider)" } }], sink, ctx);
+        await runSteps([{ tool: { kind: "other", title: a.title ?? `${a.server}.${a.name}`, server: a.server, name: a.name, input: a.input, output: a.output ?? "(interactive MCP app, not rendered by this provider)" } }], sink, ctx);
         break;
       }
       case "goal":
@@ -289,12 +317,50 @@ export async function runSteps(stepsIn, sink, ctx) {
           await sink.web({ id, ...a });
           break;
         }
-        await runSteps([{ tool: { kind: "fetch", title: `Search the web: ${a.query}`, input: { query: a.query }, output: a.url ? `Result: ${a.url}` : "Search complete" } }], sink, ctx);
+        await runSteps([{ tool: { kind: "fetch", title: a.fetch ? `Fetch ${a.url}` : `Search the web: ${a.query}`, input: { query: a.query }, output: a.url ? `Result: ${a.url}` : "Search complete" } }], sink, ctx);
         break;
       }
       case "retry":
         sink.retry?.(a);
         break;
+      case "skill": {
+        if (sink.skill) {
+          const id = ctx.nextToolId();
+          await sleep(pace.toolMs, signal);
+          await sink.skill({ id, ...a });
+          break;
+        }
+        await runSteps([{ tool: { kind: "other", title: `Skill ${a.name}`, input: { skill: a.name, args: a.args }, output: `Launching skill: ${a.name}` } }], sink, ctx);
+        break;
+      }
+      case "hook":
+        sink.hook?.(a);
+        break;
+      case "compact": {
+        if (sink.compact) {
+          await sink.compact({ ...a });
+          break;
+        }
+        await runSteps([{ say: { text: a.summary ?? "(context compacted)" } }], sink, ctx);
+        break;
+      }
+      case "notice": {
+        if (sink.notice) sink.notice(a);
+        else await runSteps([{ say: { text: a.text } }], sink, ctx);
+        break;
+      }
+      case "bgControl": {
+        const t = ctx.lastBg;
+        if (!t || !sink.bgControl) break; // adapters without a background-task protocol, or nothing started
+        const id = ctx.nextToolId();
+        await sleep(pace.toolMs, signal);
+        await sink.bgControl({ id, action: a.action, task: t });
+        if (a.action === "stop") {
+          t.handle.stopped = true;
+          t.handle.kill?.();
+        }
+        break;
+      }
       case "error":
         throw new ScenarioError(a.message, a.code, a.kind);
       case "hold":
@@ -319,7 +385,7 @@ process.on("exit", () => {
   }
 });
 
-function runShell(cmd, ctx, onOutput) {
+function runShell(cmd, ctx, onOutput, onKill) {
   return new Promise((resolveP) => {
     const child = spawn("sh", ["-c", cmd], {
       cwd: ctx.cwd,
@@ -343,6 +409,7 @@ function runShell(cmd, ctx, onOutput) {
       }
     };
     ctx.signal?.addEventListener("abort", kill, { once: true });
+    onKill?.(kill);
     child.on("close", (code) => {
       liveShells.delete(child.pid);
       ctx.signal?.removeEventListener("abort", kill);
