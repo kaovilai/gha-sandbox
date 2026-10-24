@@ -13,7 +13,7 @@ orphan `evidence` branch (raw URLs serve `image/*`, so PNG/GIF embed inline in P
 |---|---|---|
 | Web | `sandbox.yml` | Working: before/after matrix, Playwright screenshots + video, side-by-side, evidence branch |
 | Desktop (Linux Electron) | `desktop-linux.yml` | Working: real built app under Xvfb, onboarding clicked through, screenshot + 12 s recording, published |
-| Android app | `android-app.yml` | Working: KVM emulator, native build, seeded screenshots (upstream showcase) + recording, published |
+| Android app | `android-app.yml` | Working: KVM emulator, native build, seeded screenshots (upstream showcase) + recording, published; `-f live=true` drives mock threads S40-S42 with an idle-free accessibility dump (stock `uiautomator dump` fails on animating screens) + OCR proof fallback, see `mockkit/README.md` "Android UI proof ladder" |
 | iOS app | `ios-app.yml` | Working: simulator + native build + seeded screenshots; `-f live=true` also drives mock threads S40-S42 (fresh pairing per attempt); default-path pairing can still flake |
 | Emulator capability probes | `emulators.yml` | Working: Android + iOS boot, screenshot, recording |
 | Re-publish any run's artifacts | `publish-run.yml` | Working |
