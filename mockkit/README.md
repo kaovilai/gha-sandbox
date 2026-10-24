@@ -360,6 +360,19 @@ Codex sends the goal's first turn before `thread/goal/set active`: a scenario th
   leaves the app, so it is never the fallback. In `both` mode gate/hold release files are cleared before each gated scenario (the Grok pass otherwise pre-releases the Codex pass's gates).
   Note: S03 table content is scripted text and still lists "grok (mock)" as a table row; that is scenario content, not provider branding.
 
+## Claude everywhere (desktop + mobile) [track claude-everywhere]
+
+`desktop-linux.yml`, `android-app.yml`, `ios-app.yml` take `-f mock_provider=grok|codex|claude|both|all` (`both` = grok+codex, `all` = grok+codex+claude), exported as `MOCK_PROVIDER`.
+
+* **Desktop** (`mock=true`): `lib/resolve.mjs` (`expandProviders`, unit-tested) maps `claude` -> every driver runs against the Claude mock, files `claude-<driver>-*.png|mp4`; `all` = each driver
+  three times (Grok, Codex, Claude). `@claude` per token and claude-named packs (`claude`, `claude-smoke`, `desktop-claude`) win over the input. Pack `desktop-claude` = pack `desktop`
+  (s03, s08, s06, dk01-dk03). `lib/desktop.mjs` readiness also accepts Claude's `--output-format` in `probes.log` (the Claude launcher never receives `models` / `app-server`).
+  `bin/desktop-electron.mjs` just inherits `MOCK_PROVIDER`; `seed/settings.mjs` already seeded `claudeAgent`.
+* **Mobile live** (`live=true`): `scripts/mobile-live.sh` seeds `MOCK_PROVIDER`, then starts threads with `--provider claudeAgent --model claude-fable-5-1` (titles "Claude live stream" /
+  "Claude approval" / "Claude question"). Claude pass output goes to `live/claude/` (published `live__claude__s40-*.png`, results `claude-s40=ok`); `all` runs Grok, Codex, then Claude on the same
+  server and app. `server_truth` checks `thread.providerInstanceId == claudeAgent` (mismatch fails the scenario). Claude approval card buttons come from the server (`Approve` / `Decline`, the
+  driver taps `^(Approve|Allow once)$`). T3 renders Claude text per finished block, so the S40 held state shows the closed blocks (Step 1..5), same as Grok/Codex for the assertions.
+
 ## Known limits
 
 * ACP (grok), Codex (`app-server`) and Claude (`stream-json`) flavors are implemented. pi / opencode adapters are not built (see "Codex adapter" / "Claude adapter" for their limits).
