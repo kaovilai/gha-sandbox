@@ -167,7 +167,7 @@ Cannot render / not available under Xvfb (observed or by construction):
    (MCP `t3_thread_launch`); read truth with `thread show --json <id>` (`.thread.status`, `.pendingRequestCount`, assistant text).
 3. Hidden routing + gates: `mockctl next live-stream gate=g40 hold=live40 --cwd <workspace>`; the scenario waits on `gate` so the thread can be
    opened in the app first, then `mockctl release g40`.
-4. UI state: `adb shell uiautomator dump` (Android) / `axe describe-ui` (iOS) parsed by `scripts/uia.mjs`; taps by label bounds.
+4. UI state: idle-free accessibility dump / OCR ladder (Android, see "Android UI proof ladder" below) or `axe describe-ui` (iOS), parsed by `scripts/uia.mjs` (+ `uia-lib.mjs`, unit-tested); taps by label bounds.
    Screenshots + `screenrecord`/`simctl recordVideo` clips land in `out/<platform>-app/live/`.
 5. `scripts/patch-showcase-live.py` (throwaway checkout, JS only): the showcase coordinator re-navigates to its fixture route whenever the
    route's scene differs from the requested scene; the patch navigates once per scene request so manual taps/BACK stick.
@@ -178,12 +178,34 @@ Cannot render / not available under Xvfb (observed or by construction):
 | S41 | `live-approval`: gate then approval, tap **Approve** | card shot, resolved shot (only "Worked for ..." and +3 -0 are visible; the "Approved: NOTES.md was written" text is NOT in the shot, so resolution is proven by server truth: `NOTES.md` exists in the workspace, pending 1 then 0) |
 | S42 | `ask`: tap option, **Submit answers** | card, option selected, answered, server `pending` 1 then 0 |
 
-Findings (Android, CI): (a) uiautomator cannot reach an idle tree while text streams in and then leaves the previous dump on disk;
-`dump()` deletes the file first, retries, and streaming growth is proven by screenshots + server text instead; (b) intermittently (2 of 4 Android runs), a pending approval or
+Findings (Android, CI): (a) stock `uiautomator dump` cannot reach an idle tree while the thread runs (superseded by the ladder below: the idle-free dump reads the tree anyway); (b) intermittently (2 of 4 Android runs), a pending approval or
 question that exists when a thread is opened is not rendered until the thread is remounted (BACK, reopen); the driver remounts once if the
 card is absent after the first wait;
 (c) approval buttons are `Cancel`, `Decline`, `Allow all edits this session`, `Approve` (not "Allow once"); (d) assistant markdown text
 nodes are sometimes absent from the accessibility tree, so final-state checks also read the server.
+
+## Android UI proof ladder (track3-android-flake)
+
+Symptom (runs 40029080495, 40069925205): on a running mock thread (the "Working Ns" timer, streaming text, spinner) `uiautomator dump` returned nothing, so `s40` (cold app, `timeout waiting for /Step 5 of 8/`),
+`codex-s41` (approval card "never in the tree") and many `tap` retries failed intermittently.
+
+Root cause (reproduced locally on an API 36 emulator with the Clock stopwatch, and read from the runner logs as `DIAG[...]` lines): `uiautomator dump` calls `UiAutomation.waitForIdle(1000, 10000)` and prints
+`ERROR: could not get idle state.` (writing nothing) whenever accessibility events keep arriving more often than once per second. Animation scales 0 (`window/transition/animator`) and `--compressed` do not change that.
+`getRootInActiveWindow()` itself does not need idle.
+
+`scripts/mobile-live.sh` therefore proves UI state with a ladder (every rung is a real UI read; server truth alone is never proof, and an empty tree is never proof):
+
+1. `scripts/android-dump/Dump.java`: built on the runner with `javac` + `d8` (Android SDK build-tools, no download), pushed to `/data/local/tmp/dump.jar`, run via `app_process`. It connects UiAutomation exactly like `uiautomator dump`
+   (`UiAutomationShellWrapper`, fallback `new UiAutomation(looper, UiAutomationConnection)`) but never waits for idle, keeps the same visible-only filter and prints the same XML shape (~0.4 s). Primary.
+2. stock `uiautomator dump` if the dumper could not be built/run (it deletes `/sdcard/uia.xml` first: a failed dump leaves the previous file).
+3. OCR of an `adb exec-out screencap -p` screenshot (`scripts/ocr.mjs`: tesseract.js wasm from npm, no apt; raw pass + brightness-threshold pass so white labels on blue buttons like "Allow once" are read; words grouped into
+   tap-sized segments, `png-lite.mjs` decodes the PNG). Used only when rungs 1-2 return NO labelled nodes (4 empty polls in a row, or at timeout). Every use logs `OCR-PROOF /regex/ (name) -> cx cy text` and keeps
+   `live/ui/ocr-<name>.png|json` (read the PNG: OCR is only as good as the screenshot). A tree that has nodes but lacks the text is a real "not shown" and does NOT fall back to OCR (it triggers the old remount logic).
+   Taps use the OCR box centres. `$OCR_HOME` (`.t3-ocr` in the workspace) is cached by `actions/cache`; an `OCR-SELFTEST` runs once per Android live run so a broken fallback is noticed early.
+
+Evidence in the log: `dumper: idle-free UI dump ready`, `DIAG[s40-held] stock uiautomator dump -> ERROR: could not get idle state. ... | idle-free dump -> N labelled nodes` (also `live/ui-diag.txt`), `ui state <name> (fast|stock)`.
+`-f live_ui=ocr` forces rung 3 for the whole scenario (end-to-end check of the fallback; slower). Wait loops are shorter now (the dumper is ~0.4 s, so `wait_ui` polls every 1 s; open/remount timeouts 20-40 s).
+Pure logic (XML/AXe/OCR parsing, OCR word grouping, PNG decode) is covered by `mockkit/test/uia.test.mjs`.
 
 ## iOS live pairing (ios-app.yml -f live=true)
 
@@ -458,8 +480,8 @@ The drivers now hard-assert these (they were `FINDING` lines before review):
   (S41/S42 ok, PNGs read) and run 40053047787 (S40 ok, held + complete PNGs read; its S41/S42 failed on the known "This connection cannot respond" session-scope flake after 4 remounts, an infra timeout, not a Claude defect).
 * **Claude-specific harness notes.** (1) The Claude mock closes an idle text block after 800 ms (was 350): the S40 stream paces 450 ms between chunks, and at 350 ms every 2-word chunk became its own T3 message
   ("into the " / "entry point"), so `Step 5 of 8` never matched server text (runs 40044253835, 40046420449). (2) A running Claude thread shows an animated "Thinking" row + "Working Ns" pill, so Android
-  uiautomator can return an EMPTY tree for the held state (run 40049775691, screenshot still showed Steps 1-5); `mobile-live.sh` then accepts the held screenshot + server truth for the Claude pass only when the tree
-  has 0 nodes (a tree without the text still fails), the completed state still requires the UI tree. (3) Claude's approve button is `Approve`/`Allow once`; both accepted by the driver regex.
+  uiautomator returns an EMPTY tree for the held state (run 40049775691, screenshot still showed Steps 1-5). The old special case (accept screenshot + server truth) is REMOVED: the idle-free dump / OCR ladder
+  ("Android UI proof ladder") now proves the held text in the UI for every provider. (3) Claude's approve button is `Approve`/`Allow once`; both accepted by the driver regex.
 
 ## Known limits
 
