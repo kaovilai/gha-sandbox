@@ -18,8 +18,7 @@ export default async function ({ page, shot, env }) {
   await shot("worker-running");
   release("bg71", env); // mock: kill the terminal + thread/closed
   await page.waitForTimeout(6000);
-  await expandWork(page);
-  await expandRows(page, { type: "command" });
+  await expandRows(page, { type: "command" }); // the work log stays expanded from above (a second expandWork would collapse it)
   const after = await dumpPage(page, "s71 after thread/closed");
   console.log(`FINDING after thread/closed: runningBanner=${/Running:/.test(after.text)} interruptedMarker=${/interrupted|stopped|cancelled|Interrupted/i.test(after.text)} status=${JSON.stringify(after.text.match(/^(Working|Running|Done|Idle)$/m)?.[0] ?? null)}`);
   await shot("after-thread-closed");

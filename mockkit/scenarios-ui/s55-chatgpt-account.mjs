@@ -2,7 +2,7 @@
 // ChatGPT subscription account, so Settings > Providers shows "ChatGPT Pro 20x Subscription" + the account email, and
 // account/rateLimits/read feeds the usage windows (5h / weekly) and reset credits: shown by the composer's `/usage-limits` command.
 // Codex only (the Grok flavor has no ChatGPT account).
-import { bodyText, composerEditor, dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
+import { bodyText, composerEditor, expectBody, dumpPage, sendPrompt, startSession } from "../lib/ui.mjs";
 import { gotoPath, must } from "../lib/ui-extra.mjs";
 
 export const meta = { env: { MOCK_CODEX_ACCOUNT: "chatgpt", MOCK_CODEX_PLAN: "pro", MOCK_CODEX_RESET_CREDITS: "1" } };
@@ -39,12 +39,15 @@ export default async function ({ page, shot, env }) {
     await page.waitForTimeout(1500);
     const after = await dumpPage(page, "s55 after Use reset");
     console.log(`FINDING after Use reset (${Date.now() - t0}ms): credit-text=${JSON.stringify(after.text.match(/[^\n]*reset credit[^\n]*/i)?.[0] ?? null)} useResetStillThere=${/Use reset/.test(after.text)} bars=${JSON.stringify(after.text.match(/(Session|Weekly)[^\n]*\n?[^\n]*left/g) ?? null)} sessionLeft=${JSON.stringify(after.text.match(/Session[\s\S]{0,40}?(\d+)%/)?.[1] ?? null)}`);
+    // verified (run 40045786074): both bars read "100% left" and the credit line "No reset credits banked" once the account state is shared across processes
+    await expectBody(page, /Session\s*\n?\s*100% left/, "Session bar refreshed to 100% left after Use reset", 10_000);
+    await expectBody(page, /No reset credits banked/, "credit count refreshed (none left)", 10_000);
     await shot("usage-limits-after-reset");
   }
   await gotoPath(page, "/settings/providers");
   await must(page, page.getByText(/ChatGPT Pro/), "ChatGPT plan label on the Codex provider card", 30_000);
   await page.waitForTimeout(3000);
   const prov = await dumpPage(page, "s55 providers");
-  console.log(`FINDING provider card: plan=${/ChatGPT Pro 20x Subscription/.test(prov.text)} email=${/mock@example\.com/.test(prov.text)} usage=${/Weekly|Session/.test(prov.text)}`);
+  console.log(`FINDING provider card: plan=${/ChatGPT Pro \d* ?Subscription/.test(prov.text)} email=${/mock@example\.com/.test(prov.text)} usage=${/Weekly|Session/.test(prov.text)}`);
   await shot("provider-card");
 }
