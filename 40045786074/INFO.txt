@@ -1,0 +1,1 @@
+target=pingdotgg/t3code base=main head=main scenario= scenarios=codex-extra2,s51@codex,s55@codex
