@@ -45,7 +45,7 @@ fi
 # --- iOS live: fresh pairing credential per attempt (section "iOS live pairing" in mockkit/README.md) ---------------
 # Upstream mints one-time, 5 min credentials before launch and the app retries those same dead URLs; mint a new one
 # per attempt from a local server instead, and log pairing/fixture state into pass1.log (step log shows it live).
-if [ "${IOS_FRESH_PAIRING:-${IOS_LIVE:-0}}" = 1 ]; then
+if [ "${IOS_FRESH_PAIRING:-1}" = 1 ]; then
   export PAIRING_ENVS_FILE="$out/diag/pairing-envs.json" PAIRING_CWD="$(pwd)"
   python3 "$root/scripts/patch-showcase-ios-pairing.py" scripts/mobile-showcase.ts apps/mobile/src/features/showcase/ShowcaseCaptureCoordinator.tsx || echo "WARN: fresh-pairing patch failed"
   node "$root/scripts/ios-pairing-server.mjs" > "$out/diag/pairing.log" 2>&1 &
