@@ -214,9 +214,16 @@ export default async function ({ page, shot, env }) {
     // a working-tree change that names the paths: the Diff panel (shadow DOM) renders the added line
     appendFileSync(join(env.MOCKKIT_WS, "docs/ci-env.txt"), `changed: ${env.MOCKKIT_WS}/docs on ${HOST}\n`);
     await page.waitForTimeout(1500);
-    const changes = page.getByRole("button", { name: /Changes/ }).first();
-    await must(page, changes, "header Changes button");
-    await changes.click();
+    // the right panel is already open (Files): add the Diff surface from its "+" launcher (the header Changes card is hidden while a right panel shows)
+    const changes = page.getByRole("button", { name: /^Changes/ }).first();
+    if (await changes.isVisible().catch(() => false)) await changes.click();
+    else {
+      await page.getByRole("button", { name: "Add panel surface" }).first().click();
+      await page.waitForTimeout(600);
+      const diffItem = page.getByRole("menuitem", { name: /^Diff/ }).or(page.getByRole("button", { name: /^Diff/ })).or(page.getByText(/^Diff$/)).last();
+      await must(page, diffItem, "Diff entry in the panel surface launcher");
+      await diffItem.click();
+    }
     await page.waitForTimeout(2000);
     await expectText(page, "docs/ci-env.txt", "diff panel row docs/ci-env.txt");
     const box = await page.getByText("docs/ci-env.txt", { exact: true }).first().boundingBox();
