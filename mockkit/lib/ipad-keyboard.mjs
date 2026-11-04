@@ -230,6 +230,9 @@ export async function measureScreen(page) {
     return {
       layoutHeight: window.innerHeight,
       visualViewport: vv ? { height: r(vv.height), offsetTop: visibleTop, visibleBottom } : null,
+      // #19513 (open) writes these on <html> when its visual-viewport sync engages; its gate is portrait phones.
+      viewportSync: document.documentElement.dataset.viewportSync ?? null,
+      keyboardOpenFlag: document.documentElement.dataset.keyboardOpen ?? null,
       documentScrollable: document.documentElement.scrollHeight > document.documentElement.clientHeight,
       pageOverflow: { html: overflow(document.documentElement), body: overflow(document.body) },
       boxes,
@@ -258,5 +261,6 @@ export function summarize(screen) {
     `terminal=${fmt(boxes.terminalDrawer)} covered=${c.terminalDrawer}px`,
     `menu=${fmt(boxes.commandMenu)} covered=${c.commandMenu}px`,
     `page-scrollable=${screen.documentScrollable} overflow:html=${screen.pageOverflow.html} body=${screen.pageOverflow.body}`,
+    `viewport-sync=${screen.viewportSync ?? "off"}`,
   ].join(" | ");
 }
