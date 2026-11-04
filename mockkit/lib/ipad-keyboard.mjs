@@ -19,7 +19,7 @@ const STRIP_ID = "__ipad_keyboard_strip";
 
 // One function body, installable either before navigation (context) or into the loaded page.
 const INSTALL_IPAD_KEYBOARD = ({ stripId }) => {
-    const state = { open: false, height: 320 };
+    const state = { open: false, height: 320, hidden: false };
     const listeners = { resize: new Set(), scroll: new Set() };
     const fire = (type) => {
       for (const fn of listeners[type]) {
@@ -81,7 +81,7 @@ const INSTALL_IPAD_KEYBOARD = ({ stripId }) => {
         height: `${state.height}px`,
         zIndex: "2147483647",
         pointerEvents: "none",
-        display: "flex",
+        display: state.hidden ? "none" : "flex",
         alignItems: "center",
         justifyContent: "center",
         padding: "0 24px",
@@ -113,6 +113,11 @@ const INSTALL_IPAD_KEYBOARD = ({ stripId }) => {
         paint();
         fire("resize");
         return window.__ipadKeyboard.state();
+      },
+      // Hide the strip but keep the keyboard state, so a shot can show the rows it covers (see cutaway()).
+      cutaway(on) {
+        state.hidden = on;
+        paint();
       },
       state() {
         return {
@@ -146,8 +151,7 @@ export async function closeKeyboard(page) {
 // keyboard covers in the same state. The dashed line is where the keyboard starts.
 export async function cutaway(page, on = true) {
   await page.evaluate((enable) => {
-    const strip = document.getElementById("__ipad_keyboard_strip");
-    if (strip) strip.style.display = enable ? "none" : "";
+    window.__ipadKeyboard.cutaway(enable);
     const lineId = "__ipad_keyboard_edge";
     let line = document.getElementById(lineId);
     if (!enable) {
