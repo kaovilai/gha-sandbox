@@ -289,10 +289,19 @@
 
       report();
     </script>
-    <div style="position: fixed; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 100">
+    <div
+      id="controls"
+      style="position: fixed; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 100"
+    >
       <button onclick="window.__kb.open(320)" style="padding: 6px 10px">Simulate iPadOS keyboard</button>
       <button onclick="window.__kb.close()" style="padding: 6px 10px">Hide</button>
       <button onclick="window.__kb.cutaway(true)" style="padding: 6px 10px">Cutaway</button>
     </div>
+    <script>
+      // On an iPad the real keyboard is the point: the emulation buttons would only confuse.
+      if (/iPad/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))) {
+        document.getElementById("controls").remove();
+      }
+    </script>
   </body>
 </html>
