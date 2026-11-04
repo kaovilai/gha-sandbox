@@ -142,6 +142,51 @@ export async function closeKeyboard(page) {
   return page.evaluate(() => window.__ipadKeyboard.close());
 }
 
+// Hide the opaque strip and mark the keyboard's top edge instead, so a screenshot can show the rows the
+// keyboard covers in the same state. The dashed line is where the keyboard starts.
+export async function cutaway(page, on = true) {
+  await page.evaluate((enable) => {
+    const strip = document.getElementById("__ipad_keyboard_strip");
+    if (strip) strip.style.display = enable ? "none" : "";
+    const lineId = "__ipad_keyboard_edge";
+    let line = document.getElementById(lineId);
+    if (!enable) {
+      line?.remove();
+      return;
+    }
+    const vv = window.visualViewport;
+    const top = Math.round((vv?.offsetTop ?? 0) + (vv?.height ?? window.innerHeight));
+    line ??= document.documentElement.appendChild(document.createElement("div"));
+    line.id = lineId;
+    Object.assign(line.style, {
+      position: "fixed",
+      left: "0",
+      right: "0",
+      top: `${top}px`,
+      height: "0",
+      borderTop: "3px dashed #dc2626",
+      zIndex: "2147483646",
+      pointerEvents: "none",
+    });
+  }, on);
+}
+
+// How far Safari has to pan the visual viewport to keep the caret in view, in px. Each keystroke that moves the
+// caret to a new line changes this: the pan is what the user sees as the page jumping while typing.
+export async function caretPan(page) {
+  return page.evaluate(() => {
+    const vv = window.visualViewport;
+    const sel = document.getSelection();
+    const range = sel?.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+    if (range) range.collapse(false);
+    const caret = range ? range.getBoundingClientRect() : null;
+    const visibleTop = Math.round(vv?.offsetTop ?? 0);
+    const visibleBottom = visibleTop + Math.round(vv?.height ?? window.innerHeight);
+    const bottom = caret ? Math.round(caret.bottom) : null;
+    return { caretBottom: bottom, visibleTop, visibleBottom, requiredPan: bottom === null ? null : Math.max(0, bottom - visibleBottom) };
+  });
+}
+
 export async function keyboardState(page) {
   return page.evaluate(() => window.__ipadKeyboard.state());
 }

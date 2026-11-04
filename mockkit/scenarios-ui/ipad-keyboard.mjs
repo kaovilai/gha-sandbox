@@ -14,7 +14,9 @@
 import { expectVisible, composerEditor, startSession, dumpPage } from "../lib/ui.mjs";
 import {
   IPAD_KEYBOARD_HEIGHT,
+  caretPan,
   closeKeyboard,
+  cutaway,
   installIpadKeyboardNow,
   keyboardState,
   measureScreen,
@@ -63,13 +65,21 @@ export default async function ({ page, shot, env }) {
   console.log(`FINDING keyboard state: ${JSON.stringify(await keyboardState(page))}`);
   const open = await report(page, "iPadOS keyboard open");
   await shot("02-ipados-keyboard-open");
+  await cutaway(page, true);
+  await shot("02b-ipados-keyboard-open-cutaway");
+  await cutaway(page, false);
   if (!open.visualViewport || open.visualViewport.height !== open.layoutHeight - IPAD_KEYBOARD_HEIGHT) {
     throw new Error(`emulation broke: visualViewport ${JSON.stringify(open.visualViewport)} vs layout ${open.layoutHeight}`);
   }
 
-  // typing while the keyboard is open (the composer grows, the caret moves: what "bounces" on the iPad)
-  await ed.pressSequentially("\nand one more paragraph, typed with the keyboard open.", { delay: 2 });
-  await page.waitForTimeout(600);
+  // typing while the keyboard is open: each new line moves the caret, so Safari has to pan further (the bounce)
+  const pans = [];
+  for (const line of ["\nand one more paragraph, typed with the keyboard open.", "\na fourth line.", "\nand a fifth."]) {
+    await ed.pressSequentially(line, { delay: 2 });
+    await page.waitForTimeout(250);
+    pans.push(await caretPan(page));
+  }
+  console.log(`FINDING caret pans while typing: ${JSON.stringify(pans)}`);
   const typing = await report(page, "iPadOS, still typing");
   await shot("03-ipados-typing");
 
@@ -80,6 +90,9 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(1200);
   const menu = await report(page, "iPadOS, slash menu open");
   await shot("04-ipados-slash-menu");
+  await cutaway(page, true);
+  await shot("04b-ipados-slash-menu-cutaway");
+  await cutaway(page, false);
   if (!menu.boxes.commandMenu) {
     await dumpPage(page, "ipad-keyboard: slash menu never opened");
     throw new Error("the `/` menu did not render ([data-composer-drawer-layer] absent)");
@@ -100,6 +113,9 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(1500);
   const terminal = await report(page, "iPadOS, terminal drawer");
   await shot("05-ipados-terminal");
+  await cutaway(page, true);
+  await shot("05b-ipados-terminal-cutaway");
+  await cutaway(page, false);
   await toggle.click().catch(() => {});
   await page.waitForTimeout(500);
 
