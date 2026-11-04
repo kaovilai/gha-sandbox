@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Same hint T3 ships in apps/web/index.html. iPadOS ignores it, so its keyboard only shrinks
+         window.visualViewport while the layout viewport keeps its height. Chromium honours it. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <title>iPad keyboard: a bottom-anchored composer under an overlay keyboard</title>
+    <style>
+      /* The three mechanics T3 Code uses, in 40 lines of CSS:
+         1. the shell is exactly one dvh tall (AppSidebarLayout `h-dvh`)
+         2. the composer is the last in-flow row of that shell, so it sits at the layout viewport's
+            bottom no matter how much of the screen the keyboard covers
+         3. the `/` menu is portaled to <body> and positioned from `window.innerHeight`
+            (ComposerCommandMenuLayer.tsx), so it is bottom-anchored to the layout viewport too */
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+      }
+      body {
+        font: 16px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif;
+        color: #18181b;
+      }
+      .shell {
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        flex: none;
+        padding: 14px 18px;
+        border-bottom: 1px solid #e4e4e7;
+        font-weight: 600;
+      }
+      .timeline {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 18px;
+        color: #52525b;
+      }
+      .composer-slot {
+        flex: none;
+        padding: 8px 18px calc(env(safe-area-inset-bottom, 0px) + 10px);
+      }
+      .composer {
+        border: 1px solid #d4d4d8;
+        border-radius: 26px;
+        padding: 12px 16px 10px;
+      }
+      .editor {
+        min-height: 26px;
+        max-height: 40dvh;
+        overflow-y: auto;
+        outline: none;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding-top: 10px;
+        font-size: 13px;
+        color: #71717a;
+      }
+      .send {
+        width: 36px;
+        height: 36px;
+        border: 0;
+        border-radius: 999px;
+        background: #2563eb;
+        color: #fff;
+        font-size: 16px;
+      }
+      .menu {
+        position: fixed;
+        z-index: 40;
+        overflow: hidden;
+        border: 1px solid #d4d4d8;
+        border-radius: 14px;
+        background: #fff;
+        box-shadow: 0 10px 30px rgb(0 0 0 / 16%);
+      }
+      .menu > div {
+        padding: 9px 14px;
+        border-bottom: 1px solid #f1f1f4;
+        font-size: 14px;
+      }
+      #readout {
+        flex: none;
+        padding: 10px 18px;
+        border-top: 1px solid #e4e4e7;
+        background: #f8f8f9;
+        font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: pre-wrap;
+      }
+      #keyboard {
+        position: fixed;
+        inset: auto 0 0 0;
+        z-index: 2147483647;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 0 24px;
+        color: #fafafa;
+        text-align: center;
+        font-weight: 600;
+        background: linear-gradient(#3f3f46, #27272a);
+        border-top: 2px solid #a1a1aa;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>iPad keyboard repro</header>
+      <div class="timeline" id="timeline">
+        <p>
+          Tap the composer and type. The composer is the last in-flow row of a <code>100dvh</code>
+          shell, exactly like T3 Code's web client.
+        </p>
+        <p>
+          On iPadOS the keyboard shrinks only <code>window.visualViewport</code>; the layout viewport,
+          this shell and everything anchored to its bottom stay where they are, so the composer, the
+          <code>/</code> menu and the send button end up behind the keyboard.
+        </p>
+        <p>
+          On a desktop browser, press <strong>Simulate iPadOS keyboard</strong> for the same state
+          (the platform behaviour is the only thing emulated here).
+        </p>
+      </div>
+      <div class="composer-slot">
+        <div class="composer" id="composer">
+          <div class="editor" id="editor" contenteditable="true" role="textbox" aria-label="Message"></div>
+          <div class="row">
+            <span>Attach · Model</span>
+            <button class="send" id="send" aria-label="Send message">↑</button>
+          </div>
+        </div>
+      </div>
+      <div id="readout"></div>
+    </div>
+    <div id="keyboard"></div>
+
+    <script>
+      const editor = document.getElementById("editor");
+      const composer = document.getElementById("composer");
+      const send = document.getElementById("send");
+      const readout = document.getElementById("readout");
+      const timeline = document.getElementById("timeline");
+
+      for (let i = 1; i <= 12; i++) {
+        const p = document.createElement("p");
+        p.textContent = `Message ${i}: enough rows that the timeline has to scroll.`;
+        timeline.appendChild(p);
+      }
+
+      // ---- the `/` menu: portaled, fixed, bottom-anchored to window.innerHeight -------------------
+      // Mirrors ComposerCommandMenuLayer.tsx: `bottom = innerHeight - composerTop - overlap`, and it
+      // re-measures on window resize/scroll only.
+      let menu = null;
+      function positionMenu() {
+        if (!menu) return;
+        const rect = composer.getBoundingClientRect();
+        menu.style.left = `${Math.round(rect.left)}px`;
+        menu.style.width = `${Math.round(rect.width)}px`;
+        menu.style.bottom = `${Math.round(window.innerHeight - rect.top + 12)}px`;
+      }
+      function openMenu() {
+        if (menu) return;
+        menu = document.createElement("div");
+        menu.className = "menu";
+        menu.id = "menu";
+        for (const item of ["/model", "/side", "/btw", "/compact", "/usage-limits"]) {
+          const row = document.createElement("div");
+          row.textContent = item;
+          menu.appendChild(row);
+        }
+        document.body.appendChild(menu);
+        positionMenu();
+      }
+      function closeMenu() {
+        menu?.remove();
+        menu = null;
+      }
+      window.addEventListener("resize", positionMenu);
+      window.addEventListener("scroll", positionMenu, true);
+      document.addEventListener("keydown", (e) => (e.key === "Escape" ? closeMenu() : null));
+      editor.addEventListener("input", () => (editor.textContent.trim().startsWith("/") ? openMenu() : closeMenu()));
+
+      // ---- measurement ---------------------------------------------------------------------------
+      function box(el) {
+        const b = el.getBoundingClientRect();
+        return { top: Math.round(b.top), bottom: Math.round(b.bottom) };
+      }
+      function report() {
+        const vv = window.visualViewport;
+        const visibleTop = Math.round(vv?.offsetTop ?? 0);
+        const visibleBottom = visibleTop + Math.round(vv?.height ?? window.innerHeight);
+        const c = box(composer);
+        const s = box(send);
+        const covered = (b) => `${Math.max(0, b.bottom - visibleBottom)}px`;
+        const lines = [
+          `innerHeight=${window.innerHeight}  documentElement.clientHeight=${document.documentElement.clientHeight}`,
+          `visualViewport.height=${Math.round(vv?.height ?? 0)}  offsetTop=${visibleTop}  visible area=${visibleTop}..${visibleBottom}`,
+          `composer=${c.top}..${c.bottom}  send=${s.top}..${s.bottom}  ->  keyboard covers composer ${covered(c)}, send ${covered(s)}`,
+        ];
+        if (menu) {
+          const m = box(menu);
+          lines.push(`menu=${m.top}..${m.bottom}  ->  keyboard covers menu ${covered(m)}`);
+        }
+        readout.textContent = lines.join("\n");
+        requestAnimationFrame(report);
+      }
+
+      // ---- emulation for non-iPadOS browsers -------------------------------------------------------
+      // On an iPad this section is unnecessary: the real keyboard does exactly this to visualViewport.
+      const keyboard = document.getElementById("keyboard");
+      const state = { open: false, height: 320, hidden: false };
+      const listeners = { resize: new Set(), scroll: new Set() };
+      const fire = (type) => listeners[type].forEach((fn) => fn(new Event(type)));
+      let real = window.visualViewport;
+      const stub = {
+        get width() {
+          return window.innerWidth;
+        },
+        get height() {
+          return Math.max(0, window.innerHeight - (state.open ? state.height : 0));
+        },
+        get offsetTop() {
+          return 0;
+        },
+        get offsetLeft() {
+          return 0;
+        },
+        get pageTop() {
+          return window.scrollY;
+        },
+        get pageLeft() {
+          return window.scrollX;
+        },
+        get scale() {
+          return 1;
+        },
+        addEventListener: (type, fn) => listeners[type]?.add(fn),
+        removeEventListener: (type, fn) => listeners[type]?.delete(fn),
+      };
+      function paintKeyboard() {
+        keyboard.style.display = state.open && !state.hidden ? "flex" : "none";
+        keyboard.style.height = `${state.height}px`;
+        keyboard.textContent = `iPad on-screen keyboard (simulated): covers the bottom ${state.height}px · layout viewport still ${window.innerHeight}px (iPadOS ignores interactive-widget=resizes-content)`;
+      }
+      window.__kb = {
+        open(height = 320) {
+          state.open = true;
+          state.height = height;
+          window.visualViewport = stub;
+          paintKeyboard();
+          fire("resize");
+          positionMenu();
+        },
+        close() {
+          state.open = false;
+          if (real) window.visualViewport = real;
+          paintKeyboard();
+          fire("resize");
+          positionMenu();
+        },
+        // Hide the strip but keep the keyboard state; a dashed line marks the rows it covers.
+        cutaway(on) {
+          state.hidden = on;
+          paintKeyboard();
+          let edge = document.getElementById("keyboard-edge");
+          if (!on) {
+            edge?.remove();
+            return;
+          }
+          edge ??= document.body.appendChild(document.createElement("div"));
+          edge.id = "keyboard-edge";
+          edge.style.cssText = `position:fixed;left:0;right:0;top:${window.innerHeight - state.height}px;border-top:3px dashed #dc2626;z-index:2147483646;pointer-events:none`;
+        },
+      };
+      window.addEventListener("resize", paintKeyboard);
+
+      report();
+    </script>
+    <div style="position: fixed; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 100">
+      <button onclick="window.__kb.open(320)" style="padding: 6px 10px">Simulate iPadOS keyboard</button>
+      <button onclick="window.__kb.close()" style="padding: 6px 10px">Hide</button>
+      <button onclick="window.__kb.cutaway(true)" style="padding: 6px 10px">Cutaway</button>
+    </div>
+  </body>
+</html>
