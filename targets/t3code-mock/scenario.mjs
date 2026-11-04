@@ -54,7 +54,11 @@ async function authenticate(srv, id, firstRun = false) {
     const c = await b.newContext();
     if (!firstRun) await skipOnboarding(c);
     const p = await c.newPage();
-    await p.goto(srv.url, { waitUntil: "networkidle" });
+    // Some branches keep a request in flight (e.g. a status poll), so `networkidle` never fires: the page is
+    // still usable and assertShell below is the real readiness gate.
+    await p
+      .goto(srv.url, { waitUntil: "networkidle", timeout: 60_000 })
+      .catch((e) => console.log(`auth: ${e.message.split("\n")[0]} (continuing; assertShell decides readiness)`));
     // first-run drivers (meta.firstRun) land on the setup wizard, not the app shell
     if (firstRun) await p.waitForTimeout(4000);
     else await assertShell(p, `authenticated shell (${id})`, 60_000);
