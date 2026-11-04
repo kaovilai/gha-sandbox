@@ -124,6 +124,7 @@ for (const entry of ids) {
       },
       {
         viewport: mod.meta?.viewport ?? { width: 1440, height: 900 },
+        contextOptions: mod.meta?.contextOptions ?? {},
         init: async (context) => {
           if (!mod.meta?.firstRun) await skipOnboarding(context);
           await installMaskContext(context, maskRules);
