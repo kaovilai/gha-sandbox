@@ -51,7 +51,9 @@ export default async function ({ page, shot, env }) {
   await page.waitForTimeout(1000);
   await installIpadKeyboardNow(page); // the keyboard stub + strip the scenario drives below
   // Provider-update toasts are not part of the bug; keep them out of the shots (they pop mid-run).
-  await page.addStyleTag({ content: '[role="alert"],[data-slot="toast"],[data-sonner-toast]{display:none!important}' });
+  await page.addStyleTag({
+    content: '[role="alert"],[data-slot^="toast-portal"],[data-slot^="toast-viewport"]{display:none!important}',
+  });
 
   // ---- 1. reference: no keyboard ---------------------------------------------------------------
   const ed = composerEditor(page);
