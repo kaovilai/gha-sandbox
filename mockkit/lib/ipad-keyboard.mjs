@@ -209,10 +209,12 @@ export async function measureScreen(page) {
     const q = (sel) => document.querySelector(sel);
     const visibleTop = r(vv?.offsetTop ?? 0);
     const visibleBottom = visibleTop + r(vv?.height ?? window.innerHeight);
+    // Primary composer action: "Send message", or "Steer message" while a turn is running.
+    const composerForm = q('[data-chat-composer-form="true"]');
     const send =
-      document.querySelector('[aria-label="Send message"]') ??
-      [...document.querySelectorAll("button")].find((b) =>
-        /send|submit/i.test(`${b.getAttribute("aria-label") ?? ""} ${b.getAttribute("title") ?? ""} ${b.getAttribute("data-testid") ?? ""}`),
+      composerForm?.querySelector('button[type="submit"]') ??
+      [...(composerForm?.querySelectorAll("button") ?? [])].find((b) =>
+        /send|submit|steer/i.test(`${b.getAttribute("aria-label") ?? ""} ${b.getAttribute("title") ?? ""} ${b.getAttribute("data-testid") ?? ""}`),
       );
     const shell = q('[data-slot="sidebar-wrapper"]');
     const composer = q('[data-chat-composer-main-surface="true"]');
