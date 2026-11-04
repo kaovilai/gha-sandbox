@@ -17,8 +17,8 @@ export const IPAD_KEYBOARD_HEIGHT = 320;
 
 const STRIP_ID = "__ipad_keyboard_strip";
 
-export async function installIpadKeyboard(context) {
-  await context.addInitScript(({ stripId }) => {
+// One function body, installable either before navigation (context) or into the loaded page.
+const INSTALL_IPAD_KEYBOARD = ({ stripId }) => {
     const state = { open: false, height: 320 };
     const listeners = { resize: new Set(), scroll: new Set() };
     const fire = (type) => {
@@ -123,7 +123,15 @@ export async function installIpadKeyboard(context) {
         };
       },
     };
-  }, { stripId: STRIP_ID });
+};
+
+export async function installIpadKeyboard(context) {
+  await context.addInitScript(INSTALL_IPAD_KEYBOARD, { stripId: STRIP_ID });
+}
+
+// The mock runner owns the browser context, so drivers install into the already-loaded page instead.
+export async function installIpadKeyboardNow(page) {
+  await page.evaluate(INSTALL_IPAD_KEYBOARD, { stripId: STRIP_ID });
 }
 
 export async function openKeyboard(page, height = IPAD_KEYBOARD_HEIGHT) {
@@ -154,7 +162,9 @@ export async function measureScreen(page) {
     const visibleBottom = visibleTop + r(vv?.height ?? window.innerHeight);
     const send =
       document.querySelector('[aria-label="Send message"]') ??
-      [...document.querySelectorAll("button")].find((b) => /^send/i.test(b.getAttribute("aria-label") ?? ""));
+      [...document.querySelectorAll("button")].find((b) =>
+        /send|submit/i.test(`${b.getAttribute("aria-label") ?? ""} ${b.getAttribute("title") ?? ""} ${b.getAttribute("data-testid") ?? ""}`),
+      );
     const shell = q('[data-slot="sidebar-wrapper"]');
     const composer = q('[data-chat-composer-main-surface="true"]');
     const terminal = q('[data-terminal-owner="drawer"]');
@@ -174,6 +184,11 @@ export async function measureScreen(page) {
       documentScrollable: document.documentElement.scrollHeight > document.documentElement.clientHeight,
       pageOverflow: { html: overflow(document.documentElement), body: overflow(document.body) },
       boxes,
+      // Every labelled control inside the composer, so a renamed send button is diagnosable from the log.
+      composerControls: [...document.querySelectorAll('[data-chat-composer-form="true"] button')].map((b) => ({
+        label: (b.getAttribute("aria-label") ?? b.getAttribute("title") ?? b.textContent ?? "").trim().slice(0, 40),
+        bottom: box(b)?.bottom ?? null,
+      })),
       coveredByKeyboard: {
         shellTop: boxes.shell ? Math.max(0, visibleTop - boxes.shell.top) : null,
         composer: covered(boxes.composer),

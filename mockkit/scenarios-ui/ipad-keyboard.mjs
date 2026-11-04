@@ -15,7 +15,7 @@ import { expectVisible, composerEditor, startSession, dumpPage } from "../lib/ui
 import {
   IPAD_KEYBOARD_HEIGHT,
   closeKeyboard,
-  installIpadKeyboard,
+  installIpadKeyboardNow,
   keyboardState,
   measureScreen,
   openKeyboard,
@@ -38,12 +38,16 @@ const LONG_PROMPT = [
 async function report(page, label) {
   const screen = await measureScreen(page);
   console.log(`FINDING ${label}: ${summarize(screen)}`);
+  if (screen.composerControls.length) {
+    console.log(`FINDING ${label} composer controls: ${JSON.stringify(screen.composerControls.filter((c) => c.label).slice(0, 8))}`);
+  }
   return screen;
 }
 
 export default async function ({ page, shot, env }) {
   await startSession(page, env);
   await page.waitForTimeout(1000);
+  await installIpadKeyboardNow(page); // the keyboard stub + strip the scenario drives below
 
   // ---- 1. reference: no keyboard ---------------------------------------------------------------
   const ed = composerEditor(page);
