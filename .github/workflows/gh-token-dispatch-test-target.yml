@@ -1,0 +1,23 @@
+name: GH_TOKEN dispatch test (target)
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Message passed from dispatcher'
+        required: false
+        default: ''
+  repository_dispatch:
+    types: [gh-token-dispatch-test]
+
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report who triggered this run
+        run: |
+          echo "event_name:         ${{ github.event_name }}"
+          echo "actor:              ${{ github.actor }}"
+          echo "triggering_actor:   ${{ github.triggering_actor }}"
+          echo "message input:      ${{ inputs.message || github.event.client_payload.message }}"
+          echo "repository_dispatch payload: ${{ toJSON(github.event.client_payload) }}"
