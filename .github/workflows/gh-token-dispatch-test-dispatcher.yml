@@ -23,6 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      # gh CLI cannot resolve the repo from git remotes (no checkout) and does
+      # not read GITHUB_REPOSITORY on its own -- without this, `gh workflow run`
+      # fails with "fatal: not a git repository".
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Dispatch target with builtin GITHUB_TOKEN (no checkout, no GH_REPO)
         run: |
