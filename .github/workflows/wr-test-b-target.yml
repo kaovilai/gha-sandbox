@@ -1,0 +1,13 @@
+name: WR test B (target)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "B running, event=${{ github.event_name }} actor=${{ github.actor }}"
+          sleep 5
+          echo "B done"

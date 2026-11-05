@@ -1,0 +1,17 @@
+name: WR test C (watcher)
+
+on:
+  workflow_run:
+    workflows: ['WR test B (target)']
+    types: [completed]
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "C FIRED — workflow_run fires for GITHUB_TOKEN-dispatched runs"
+          echo "workflow_run.id=${{ github.event.workflow_run.id }}"
+          echo "workflow_run.name=${{ github.event.workflow_run.name }}"
+          echo "workflow_run.event=${{ github.event.workflow_run.event }}"
+          echo "workflow_run.conclusion=${{ github.event.workflow_run.conclusion }}"
