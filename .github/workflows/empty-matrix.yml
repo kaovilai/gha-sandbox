@@ -1,0 +1,27 @@
+name: 'Empty matrix probe'
+
+on:
+  workflow_dispatch:
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      variants: ${{ steps.set.outputs.variants }}
+    steps:
+      - id: set
+        run: |
+          echo "variants={\"include\": []}" >> "$GITHUB_OUTPUT"
+  build:
+    needs: changes
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.changes.outputs.variants) }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "should never run"
+  after:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "after ran"
