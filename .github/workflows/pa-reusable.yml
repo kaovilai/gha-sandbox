@@ -6,9 +6,14 @@ on:
       v:
         required: true
         type: string
+      run:
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   echo:
+    if: inputs.run
     runs-on: ubuntu-latest
     steps:
-      - run: echo "reusable got v=${{ inputs.v }}"
+      - run: echo "reusable got v=${{ inputs.v }} run=${{ inputs.run }}"

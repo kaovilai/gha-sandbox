@@ -1,7 +1,10 @@
 name: PA caller
 
-# Phase-2 probe: reusable workflow called from a matrix job with per-leg
-# skip conditions — the mechanics build.yml depends on.
+# Phase-2 probe v2: reusable workflow called from a matrix job. Per-leg
+# gating cannot use `matrix` in a job-level `if` (evaluated before matrix
+# expansion — invalid workflow file), so the condition is computed in
+# `with:` (matrix allowed there) and passed as a boolean input the callee
+# gates its job on.
 
 on:
   workflow_dispatch:
@@ -26,6 +29,6 @@ jobs:
     uses: ./.github/workflows/pa-reusable.yml
     with:
       v: ${{ matrix.v }}
-    if: >-
-      (github.event_name == 'workflow_dispatch' && (inputs.only == '' || matrix.v == inputs.only)) ||
-      (github.event_name != 'workflow_dispatch' && matrix.v != 'y')
+      run: >-
+        ${{ (github.event_name == 'workflow_dispatch' && (inputs.only == '' || matrix.v == inputs.only)) ||
+             (github.event_name != 'workflow_dispatch' && matrix.v != 'y') }}
