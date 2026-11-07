@@ -1,0 +1,31 @@
+name: PA caller
+
+# Phase-2 probe: reusable workflow called from a matrix job with per-leg
+# skip conditions — the mechanics build.yml depends on.
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Run only this leg'
+        required: false
+        default: ''
+  push:
+    paths:
+      - '.github/workflows/pa-caller.yml'
+
+jobs:
+  gated:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { v: x }
+          - { v: y }
+          - { v: z }
+    uses: ./.github/workflows/pa-reusable.yml
+    with:
+      v: ${{ matrix.v }}
+    if: >-
+      (github.event_name == 'workflow_dispatch' && (inputs.only == '' || matrix.v == inputs.only)) ||
+      (github.event_name != 'workflow_dispatch' && matrix.v != 'y')

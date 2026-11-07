@@ -1,0 +1,14 @@
+name: PA reusable
+
+on:
+  workflow_call:
+    inputs:
+      v:
+        required: true
+        type: string
+
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "reusable got v=${{ inputs.v }}"
