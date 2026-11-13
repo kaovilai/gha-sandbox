@@ -1,0 +1,148 @@
+name: Sill tab repro
+# Repro for Saffsanity/sill#366: switching tabs inside a streamed window (macOS native
+# tab groups) drops the streamed CGWindowID from ScreenCaptureKit's on-screen list.
+# Runs a REAL SillHost (not --synthetic) with Safari on the runner, drives it with
+# Scripts/sillclient.py, and switches tabs via AppleScript mid-stream.
+# Phase 0 probes whether ScreenCaptureKit lists windows on the runner at all (TCC).
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "sill repo (owner/name)"
+        default: Saffsanity/sill
+      ref:
+        description: "sill ref"
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+
+      - name: Build SillHost
+        run: swift build -c release 2>&1 | tail -5
+
+      - name: Phase 0 - does ScreenCaptureKit list windows on this runner
+        run: |
+          cat > /tmp/sck.swift <<'EOF'
+          import ScreenCaptureKit
+          let sem = DispatchSemaphore(value: 0)
+          SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) { c, e in
+              if let e { print("SCK-ERROR: \(e.localizedDescription)") }
+              else { print("SCK-WINDOWS: \(c?.windows.count ?? -1) DISPLAYS: \(c?.displays.count ?? -1)") }
+              sem.signal()
+          }
+          _ = sem.wait(timeout: .now() + 15)
+          EOF
+          swift /tmp/sck.swift | tee probe.txt
+
+      - name: Phase 1 - Safari two tabs, CGWindowID across a tab switch
+        run: |
+          set -uo pipefail
+          cat > /tmp/cglist.swift <<'EOF'
+          import CoreGraphics
+          let opts: CGWindowListOption = [.optionOnScreenOnly]
+          guard let list = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]] else { exit(1) }
+          for w in list {
+              guard let owner = w[kCGWindowOwnerName as String] as? String, owner == "Safari" else { continue }
+              let id = w[kCGWindowNumber as String] as? Int ?? -1
+              let layer = w[kCGWindowLayer as String] as? Int ?? -1
+              let b = w[kCGWindowBounds as String] as? [String: Any] ?? [:]
+              print("SAFARI-WINDOW id=\(id) layer=\(layer) frame=\(b["X"] ?? 0),\(b["Y"] ?? 0) \(b["Width"] ?? 0)x\(b["Height"] ?? 0)")
+          }
+          EOF
+          safari_ids() { swift /tmp/cglist.swift; }
+          tabcount() { osascript -e 'tell application "Safari" to count tabs of front document' 2>>osascript.err || echo 0; }
+          wincount() { osascript -e 'tell application "Safari" to count windows' 2>>osascript.err || echo 0; }
+
+          osascript -e 'tell application "Safari" to activate' >>osascript.err 2>&1 || echo "ASEVENT-FAIL activate"
+          sleep 2
+          osascript -e 'tell application "Safari" to open location "https://example.com"' >>osascript.err 2>&1 || echo "ASEVENT-FAIL open location 1"
+          sleep 4
+          # A second tab: try Safari's dictionary first, then a Cmd+T keystroke.
+          if ! osascript -e 'tell application "Safari" to tell front document to make new tab with properties {URL:"https://example.org"}' >>osascript.err 2>&1; then
+            echo "make new tab failed, trying Cmd+T" | tee -a osascript.err
+            osascript -e 'tell application "System Events" to keystroke "t" using command down' >>osascript.err 2>&1 \
+              || echo "ASEVENT-FAIL keystroke (no Accessibility on runner)"
+            osascript -e 'tell application "Safari" to open location "https://example.org"' >>osascript.err 2>&1 || echo "ASEVENT-FAIL open location 2"
+          fi
+          sleep 4
+          echo "SAFARI-STATE windows=$(wincount) tabs_front=$(tabcount)"
+
+          echo "== on-screen Safari windows, before switch =="
+          safari_ids | tee before.txt
+          BEFORE=$(grep -oE 'id=[0-9]+' before.txt | head -1 | cut -d= -f2)
+          if [ -z "$BEFORE" ]; then echo "PHASE1-FAIL no on-screen Safari window"; exit 3; fi
+
+          osascript -e 'tell application "Safari" to set current tab of front document to tab 2 of front document' >>osascript.err 2>&1 || echo "ASEVENT-FAIL switch to tab 2"
+          sleep 3
+          echo "== on-screen Safari windows, after switch =="
+          safari_ids | tee after.txt
+          AFTER=$(grep -oE 'id=[0-9]+' after.txt | head -1 | cut -d= -f2)
+          echo "TAB-SWITCH before_id=$BEFORE after_id=$AFTER"
+          echo "BEFORE_ID=$BEFORE" >> "$GITHUB_ENV"
+          if [ "$BEFORE" != "$AFTER" ] && [ -n "$AFTER" ]; then
+            echo "TAB-MECHANISM-CONFIRMED: a tab swap swaps the CGWindowID (issue #366's premise)"
+          else
+            echo "TAB-MECHANISM-NOT-SEEN on this runner"
+          fi
+
+      - name: Phase 2 - stream Safari through a real SillHost, switch tab mid-stream
+        run: |
+          set -uo pipefail
+          SCKN=$(grep -oE 'SCK-WINDOWS: [0-9-]+' probe.txt | grep -oE '[0-9-]+$' || echo 0)
+          if [ "${SCKN:-0}" -le 0 ]; then
+            echo "SCK-NO-WINDOWS: ScreenCaptureKit lists nothing here (no Screen Recording grant on the runner); skipping the stream repro."
+            exit 0
+          fi
+          BEFORE="${BEFORE_ID:?phase 1 found no Safari window}"
+
+          .build/release/SillHost > host.log 2>&1 &
+          HOSTPID=$!
+          PORT=""
+          for i in $(seq 1 40); do
+            PORT=$(lsof -nP -iTCP -sTCP:LISTEN -a -p "$HOSTPID" -Fn 2>/dev/null | grep '^n' | head -1 | sed 's/^n[^:]*://')
+            [ -n "$PORT" ] && break
+            sleep 1
+          done
+          echo "HOST pid=$HOSTPID port=$PORT"
+          if [ -z "$PORT" ]; then echo "no listener"; cat host.log; kill "$HOSTPID" 2>/dev/null; exit 4; fi
+          sleep 2
+
+          python3 Scripts/sillclient.py "$PORT" 24 none "--pick=window:$BEFORE@2" > client.log 2>&1 &
+          sleep 10   # picked at t=2, frames flowing by now
+          echo "== switching to tab 2 (t=10) =="
+          osascript -e 'tell application "Safari" to set current tab of front document to tab 2 of front document' >>osascript.err 2>&1 || echo "ASEVENT-FAIL switch to tab 2 (phase 2)"
+          sleep 6
+          echo "== switching back to tab 1 (t=16) =="
+          osascript -e 'tell application "Safari" to set current tab of front document to tab 1 of front document' >>osascript.err 2>&1 || echo "ASEVENT-FAIL switch back"
+          wait
+          kill "$HOSTPID" 2>/dev/null
+          sleep 1
+
+          echo "== host.log =="
+          cat host.log
+          echo "== client.log =="
+          cat client.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sill-tab-repro
+          path: |
+            probe.txt
+            before.txt
+            after.txt
+            host.log
+            client.log
+            osascript.err
+          if-no-files-found: ignore
