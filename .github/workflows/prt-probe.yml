@@ -1,0 +1,23 @@
+name: PRT default-branch probe
+# Empirical probe for the 2025-12-08 pull_request_target change: this
+# workflow exists ONLY on the default branch (main). A PR targeting the
+# non-default branch probe-base (which has NO copy of this workflow)
+# will run this workflow if and only if the default branch's copy
+# governs. GITHUB_REF in the log names the ref used.
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report the ref this ran from
+        run: |
+          echo "GITHUB_REF=$GITHUB_REF"
+          echo "GITHUB_SHA=$GITHUB_SHA"
+          echo "base=${{ github.event.pull_request.base.ref }}"
+          echo "default=${{ github.event.repository.default_branch }}"
