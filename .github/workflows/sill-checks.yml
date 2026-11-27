@@ -1,0 +1,85 @@
+name: Sill checks
+# Full check + build of a Sill ref (Saffsanity/sill or a fork) on a macOS runner: swift build,
+# every pure check, the iOS app for the simulator, and harness photos of the DEBUG layout
+# harness (-SillLayout / -SillConnectCase mock screens), for UX review without a Mac at hand.
+# A throwaway simulator on an ephemeral runner: nothing shared, nothing that reaches a Mac.
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "sill repo (owner/name)"
+        default: Saffsanity/sill
+      ref:
+        description: "sill ref (branch/sha)"
+        required: true
+      photos:
+        description: "Also take harness photos"
+        type: boolean
+        default: true
+      cases:
+        description: "Extra photo cases: 'name arg arg...' per line"
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+
+      - name: The Mac side (swift build -c release)
+        run: swift build -c release 2>&1 | tail -5
+
+      - name: Every pure check (Tests/checks/run-all.sh)
+        run: Tests/checks/run-all.sh
+
+      - name: The iOS app for the simulator
+        run: |
+          xcodebuild -project iOSClient/Sill.xcodeproj -scheme Sill \
+            -destination 'generic/platform=iOS Simulator' -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/DD" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 build 2>&1 | tail -15
+
+      - name: Harness photos
+        if: ${{ inputs.photos }}
+        run: |
+          set -euo pipefail
+          mkdir photos
+          # Any iPhone on the newest iOS runtime the image has.
+          UDID="$(xcrun simctl list -j devices available | jq -r '[.devices[][] | select(.isAvailable)] | (map(select(.deviceTypeIdentifier | contains("iPhone"))) | .[0] // .[0]).udid')"
+          echo "simulator: $UDID"
+          xcrun simctl boot "$UDID" || true
+          APP="$(find "$RUNNER_TEMP/DD/Build/Products" -name Sill.app -type d | head -1)"
+          xcrun simctl install "$UDID" "$APP"
+          shot() {
+            name="$1"; shift
+            xcrun simctl terminate "$UDID" me.saffer.sill 2>/dev/null || true
+            xcrun simctl launch "$UDID" me.saffer.sill "$@" >/dev/null
+            sleep 6
+            xcrun simctl io "$UDID" screenshot "photos/$name.png" >/dev/null
+          }
+          shot remote-rows-phone -SillLayout 390x844 -SillConnectCase remote
+          shot addaddress-phone -SillLayout 390x844 -SillConnectCase addaddress
+          shot addaddress-problem -SillLayout 390x844 -SillConnectCase addaddress -SillAddressProblem alreadydialed
+          shot addaddress-full -SillLayout 390x844 -SillConnectCase addaddress -SillAddressProblem full
+          shot addaddress-notkeepable -SillLayout 390x844 -SillConnectCase addaddress -SillAddressProblem notkeepable
+          shot addaddress-added -SillLayout 390x844 -SillConnectCase addaddress -SillAddressAdded 1
+          shot addaddress-duo -SillLayout 669x951 -SillConnectCase addaddress
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            shot $line
+          done <<< "${{ inputs.cases }}"
+          # Sizes only, so a one-colour photo stands out in the artifact.
+          sips -g pixelWidth photos/*.png || true
+          xcrun simctl shutdown "$UDID" || true
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.photos }}
+        with:
+          name: sill-photos
+          path: photos/
